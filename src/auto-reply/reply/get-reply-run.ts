@@ -440,6 +440,10 @@ export async function runPreparedReply(
     originalPrompt: taskRouterDecision.rewrittenText,
   });
   prefixedCommandBody = executionKernelPlan.promptText ?? taskRouterDecision.rewrittenText;
+  execOverrides = {
+    ...execOverrides,
+    ...executionKernelPlan.execOverrides,
+  };
   if (!resolvedThinkLevel) {
     resolvedThinkLevel = await modelState.resolveDefaultThinkingLevel();
   }

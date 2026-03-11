@@ -50,6 +50,15 @@ describe("task/kernel", () => {
       runSessionId: "run-1",
       agentProfile: "builder",
     });
+    expect(plan.policy).toMatchObject({
+      mode: "auto",
+      risk: "medium",
+      writeIntent: "workspace",
+      requiresConfirmation: false,
+    });
+    expect(plan.execOverrides).toMatchObject({
+      ask: "on-miss",
+    });
     expect(plan.events[0]).toMatchObject({
       type: "session_started",
       taskId: "task-1",
@@ -58,6 +67,7 @@ describe("task/kernel", () => {
     });
     expect(plan.promptText).toContain("[Execution Kernel]");
     expect(plan.promptText).toContain("Command Type: start_session");
+    expect(plan.promptText).toContain("Execution Policy Mode: auto");
   });
 
   it("builds a resume_session plan for continue", () => {
@@ -96,6 +106,58 @@ describe("task/kernel", () => {
     expect(plan.events[0]).toMatchObject({
       type: "summary_ready",
       status: "building",
+    });
+    expect(plan.policy?.mode).toBe("auto");
+  });
+
+  it("downgrades to readonly policy for readonly control", () => {
+    const plan = resolveExecutionKernelPlan({
+      decision: buildDecision({
+        controlAction: {
+          type: "downgrade_to_readonly",
+          conversationId: "telegram:1",
+          taskId: "task-1",
+          runSessionId: "run-1",
+        },
+      }),
+      originalPrompt: "[Task Router]\nreadonly task",
+    });
+
+    expect(plan.command?.type).toBe("apply_permission_update");
+    expect(plan.policy).toMatchObject({
+      mode: "readonly",
+      risk: "low",
+      writeIntent: "none",
+      requiresConfirmation: false,
+    });
+    expect(plan.execOverrides).toMatchObject({
+      security: "allowlist",
+      ask: "always",
+    });
+    expect(plan.promptText).toContain("Execution Policy Mode: readonly");
+  });
+
+  it("marks git-affecting work as ask/high-risk", () => {
+    const plan = resolveExecutionKernelPlan({
+      decision: buildDecision({
+        taskIntent: {
+          kind: "modify_code",
+          text: "fix router and git commit the changes",
+          conversationId: "telegram:1",
+          requiresExecution: true,
+        },
+      }),
+      originalPrompt: "fix router and git commit the changes",
+    });
+
+    expect(plan.policy).toMatchObject({
+      mode: "ask",
+      risk: "high",
+      writeIntent: "git",
+      requiresConfirmation: true,
+    });
+    expect(plan.execOverrides).toMatchObject({
+      ask: "always",
     });
   });
 

@@ -1,3 +1,4 @@
+import type { ExecToolDefaults } from "../agents/bash-tools.js";
 import {
   createExecutionCommand,
   createExecutionEvent,
@@ -7,17 +8,136 @@ import {
 import type { TaskRouterDecision } from "./router.js";
 import type { TaskRecord } from "./types.js";
 
+export const EXECUTION_POLICY_MODES = ["readonly", "ask", "auto"] as const;
+export type ExecutionPolicyMode = (typeof EXECUTION_POLICY_MODES)[number];
+
+export const EXECUTION_POLICY_RISKS = ["low", "medium", "high"] as const;
+export type ExecutionPolicyRisk = (typeof EXECUTION_POLICY_RISKS)[number];
+
+export const EXECUTION_WRITE_INTENTS = ["none", "workspace", "git", "external"] as const;
+export type ExecutionWriteIntent = (typeof EXECUTION_WRITE_INTENTS)[number];
+
+export type ExecutionPolicy = {
+  mode: ExecutionPolicyMode;
+  risk: ExecutionPolicyRisk;
+  writeIntent: ExecutionWriteIntent;
+  requiresConfirmation: boolean;
+};
+
 type ExecutionKernelPlan = {
   command?: ExecutionCommand;
   events: ExecutionEvent[];
+  policy?: ExecutionPolicy;
   promptText?: string;
+  execOverrides?: Pick<ExecToolDefaults, "security" | "ask">;
 };
+
+function resolveExecutionPolicy(params: {
+  decision: TaskRouterDecision;
+  task?: TaskRecord;
+}): ExecutionPolicy | undefined {
+  const kind = params.task?.kind ?? params.decision.taskIntent.kind;
+  const loweredText = params.decision.taskIntent.text.toLowerCase();
+
+  if (params.decision.controlAction?.type === "downgrade_to_readonly") {
+    return {
+      mode: "readonly",
+      risk: "low",
+      writeIntent: "none",
+      requiresConfirmation: false,
+    };
+  }
+
+  if (kind === "research_repo" || kind === "review_diff" || kind === "ask") {
+    return {
+      mode: "readonly",
+      risk: "low",
+      writeIntent: "none",
+      requiresConfirmation: false,
+    };
+  }
+
+  if (kind === "run_tests") {
+    return {
+      mode: "auto",
+      risk: "medium",
+      writeIntent: "workspace",
+      requiresConfirmation: false,
+    };
+  }
+
+  if (kind === "modify_code") {
+    const asksForGit = /\b(git commit|commit|git push|push|open pr|create pr|pull request)\b/i.test(
+      loweredText,
+    );
+    const asksForExternal = /\b(send message|telegram|discord|slack|email|feishu)\b/i.test(
+      loweredText,
+    );
+
+    if (asksForExternal) {
+      return {
+        mode: "ask",
+        risk: "high",
+        writeIntent: "external",
+        requiresConfirmation: true,
+      };
+    }
+    if (asksForGit) {
+      return {
+        mode: "ask",
+        risk: "high",
+        writeIntent: "git",
+        requiresConfirmation: true,
+      };
+    }
+    return {
+      mode: "auto",
+      risk: "medium",
+      writeIntent: "workspace",
+      requiresConfirmation: false,
+    };
+  }
+
+  if (kind === "resume_task") {
+    return {
+      mode: "ask",
+      risk: "medium",
+      writeIntent: "workspace",
+      requiresConfirmation: false,
+    };
+  }
+
+  return undefined;
+}
+
+function resolvePolicyExecOverrides(
+  policy: ExecutionPolicy | undefined,
+): Pick<ExecToolDefaults, "security" | "ask"> | undefined {
+  if (!policy) {
+    return undefined;
+  }
+  if (policy.mode === "readonly") {
+    return {
+      security: "allowlist",
+      ask: "always",
+    };
+  }
+  if (policy.mode === "ask" || policy.requiresConfirmation) {
+    return {
+      ask: "always",
+    };
+  }
+  return {
+    ask: "on-miss",
+  };
+}
 
 function buildExecutionKernelPrompt(params: {
   command: ExecutionCommand;
   events: ExecutionEvent[];
   originalPrompt: string;
   task?: TaskRecord;
+  policy?: ExecutionPolicy;
 }): string {
   const commandLines = [
     `[Execution Kernel]`,
@@ -35,12 +155,18 @@ function buildExecutionKernelPrompt(params: {
     params.task?.latestRunSession?.status
       ? `Run Status Snapshot: ${params.task.latestRunSession.status}`
       : undefined,
+    params.policy ? `Execution Policy Mode: ${params.policy.mode}` : undefined,
+    params.policy ? `Execution Policy Risk: ${params.policy.risk}` : undefined,
+    params.policy ? `Execution Write Intent: ${params.policy.writeIntent}` : undefined,
+    params.policy
+      ? `Execution Requires Confirmation: ${params.policy.requiresConfirmation}`
+      : undefined,
     params.events.length > 0 ? `Execution Events:` : undefined,
     ...params.events.map(
       (event, index) =>
         `${index + 1}. ${event.type} (run=${event.runSessionId}, status=${event.status ?? "n/a"}, message=${event.message ?? ""})`,
     ),
-    "Instruction: Treat the structured execution command above as the control-plane intent for this turn. Use it to continue the current task instead of interpreting the message as an unrelated fresh request.",
+    "Instruction: Treat the structured execution command above as the control-plane intent for this turn. Respect the execution policy: readonly means no writes or mutating commands; ask means require explicit confirmation before risky writes or external side effects; auto means routine workspace edits/tests may proceed within policy.",
     "",
     params.originalPrompt,
   ].filter(Boolean);
@@ -57,15 +183,15 @@ function resolveExecutionCommandType(
   if (decision.controlAction?.type === "request_summary" && decision.snapshot.latestTask) {
     return "request_summary";
   }
+  if (decision.controlAction?.type === "downgrade_to_readonly" && decision.snapshot.latestTask) {
+    return "apply_permission_update";
+  }
   if (
     decision.taskIntent.requiresExecution &&
     decision.taskIntent.kind !== "resume_task" &&
     decision.taskIntent.kind !== "cancel_task"
   ) {
     return "start_session";
-  }
-  if (decision.controlAction?.type === "downgrade_to_readonly" && decision.snapshot.latestTask) {
-    return "apply_permission_update";
   }
   return null;
 }
@@ -134,14 +260,23 @@ export function resolveExecutionKernelPlan(input: {
     );
   }
 
+  const policy = resolveExecutionPolicy({
+    decision: input.decision,
+    task,
+  });
+  const execOverrides = resolvePolicyExecOverrides(policy);
+
   return {
     command,
     events,
+    policy,
+    execOverrides,
     promptText: buildExecutionKernelPrompt({
       command,
       events,
       originalPrompt: input.originalPrompt,
       task,
+      policy,
     }),
   };
 }

@@ -199,7 +199,63 @@ describe("runPreparedReply media-only handling", () => {
     expect(call?.commandBody).toContain("[Execution Kernel]");
     expect(call?.commandBody).toContain("Command Type: start_session");
     expect(call?.commandBody).toContain("Task ID:");
+    expect(call?.commandBody).toContain("Execution Policy Mode: auto");
     expect(call?.followupRun.prompt).toContain("[Execution Kernel]");
+    expect(call?.followupRun.run.execOverrides).toMatchObject({ ask: "on-miss" });
+  });
+
+  it("forces readonly execution posture for readonly control", async () => {
+    await runPreparedReply(
+      baseParams({
+        ctx: {
+          Body: "readonly",
+          RawBody: "readonly",
+          CommandBody: "readonly",
+          ThreadHistoryBody: "",
+          OriginatingChannel: "slack",
+          OriginatingTo: "C123",
+          ChatType: "group",
+        },
+        sessionCtx: {
+          Body: "readonly",
+          BodyStripped: "readonly",
+          ThreadHistoryBody: "",
+          Provider: "slack",
+          ChatType: "group",
+          OriginatingChannel: "slack",
+          OriginatingTo: "C123",
+        },
+        sessionEntry: {
+          taskRouter: {
+            latestTask: {
+              id: "task-1",
+              kind: "modify_code",
+              status: "running",
+              title: "fix router",
+              conversationId: "session-key",
+              createdAt: 1,
+              updatedAt: 2,
+              latestRunSessionId: "run-1",
+              latestRunSession: {
+                id: "run-1",
+                status: "building",
+                agentProfile: "builder",
+                updatedAt: 2,
+              },
+            },
+            recentTasks: [],
+          },
+        } as never,
+      }),
+    );
+
+    const call = vi.mocked(runReplyAgent).mock.calls[0]?.[0];
+    expect(call?.commandBody).toContain("Command Type: apply_permission_update");
+    expect(call?.commandBody).toContain("Execution Policy Mode: readonly");
+    expect(call?.followupRun.run.execOverrides).toMatchObject({
+      ask: "always",
+      security: "allowlist",
+    });
   });
 
   it("allows media-only prompts and preserves thread context in queued followups", async () => {
