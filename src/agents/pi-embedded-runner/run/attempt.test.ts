@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../../../config/config.js";
 import { resolveOllamaBaseUrlForRun } from "../../ollama-stream.js";
+import type { AnyAgentTool } from "../../pi-tools.types.js";
 import {
   buildAfterTurnRuntimeContext,
   composeSystemPromptWithHookContext,
@@ -11,6 +12,9 @@ import {
   resolvePromptBuildHookResult,
   resolvePromptModeForSession,
   resolveRuntimeExecutionToolPolicy,
+  resolveExecutionPolicyGateReason,
+  isGitMutationCommand,
+  wrapToolsWithExecutionPolicyGate,
   shouldInjectOllamaCompatNumCtx,
   decodeHtmlEntitiesInObject,
   wrapOllamaCompatNumCtx,
@@ -642,6 +646,69 @@ describe("prependSystemPromptAddition", () => {
     });
 
     expect(result).toBe("base system");
+  });
+});
+
+describe("execution policy confirmation gates", () => {
+  it("detects mutating git commands", () => {
+    expect(isGitMutationCommand('git commit -m "x"')).toBe(true);
+    expect(isGitMutationCommand("gh pr create --fill")).toBe(true);
+    expect(isGitMutationCommand("git status")).toBe(false);
+  });
+
+  it("requires confirmation for external side-effect tools", () => {
+    const reason = resolveExecutionPolicyGateReason({
+      executionPolicy: {
+        mode: "ask",
+        risk: "high",
+        writeIntent: "external",
+        requiresConfirmation: true,
+      },
+      toolName: "message",
+      toolArgs: { action: "send", message: "hello" },
+    });
+
+    expect(reason).toContain("explicit user confirmation");
+    expect(reason).toContain("external");
+  });
+
+  it("requires confirmation for git mutation exec commands", () => {
+    const reason = resolveExecutionPolicyGateReason({
+      executionPolicy: {
+        mode: "ask",
+        risk: "high",
+        writeIntent: "git",
+        requiresConfirmation: true,
+      },
+      toolName: "exec",
+      toolArgs: { command: "git push origin main" },
+    });
+
+    expect(reason).toContain("git mutations");
+  });
+
+  it("wraps tools with confirmation gate while keeping them visible", async () => {
+    const wrapped = wrapToolsWithExecutionPolicyGate({
+      executionPolicy: {
+        mode: "ask",
+        risk: "high",
+        writeIntent: "external",
+        requiresConfirmation: true,
+      },
+      tools: [
+        {
+          name: "message",
+          label: "message",
+          description: "send message",
+          parameters: { type: "object", properties: {} },
+          execute: vi.fn(async () => ({ ok: true })),
+        },
+      ] satisfies AnyAgentTool[],
+    });
+
+    await expect(
+      wrapped[0]?.execute?.("tool-1", { action: "send" }, undefined, undefined),
+    ).rejects.toThrow(/explicit user confirmation/i);
   });
 });
 

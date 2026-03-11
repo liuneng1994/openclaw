@@ -70,6 +70,7 @@ import { applyPiAutoCompactionGuard } from "../../pi-settings.js";
 import { toClientToolDefinitions } from "../../pi-tool-definition-adapter.js";
 import { createOpenClawCodingTools, resolveToolLoopDetectionConfig } from "../../pi-tools.js";
 import { filterToolsByPolicy } from "../../pi-tools.policy.js";
+import type { AnyAgentTool } from "../../pi-tools.types.js";
 import { resolveSandboxContext } from "../../sandbox.js";
 import { resolveSandboxRuntimeStatus } from "../../sandbox/runtime-status.js";
 import { isXaiProvider } from "../../schema/clean-for-xai.js";
@@ -639,6 +640,94 @@ export function prependSystemPromptAddition(params: {
 }
 
 /** Build runtime context passed into context-engine afterTurn hooks. */
+const EXTERNAL_CONFIRMATION_TOOL_NAMES = new Set([
+  "message",
+  "sessions_send",
+  "tts",
+  "feishu_doc",
+  "feishu_drive",
+  "feishu_wiki",
+  "feishu_bitable_create_app",
+  "feishu_bitable_create_field",
+  "feishu_bitable_create_record",
+  "feishu_bitable_update_record",
+]);
+
+export function isGitMutationCommand(command: string): boolean {
+  const normalized = command.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  return [
+    /(^|\s)git\s+commit(\s|$)/,
+    /(^|\s)git\s+push(\s|$)/,
+    /(^|\s)git\s+tag(\s|$)/,
+    /(^|\s)git\s+merge(\s|$)/,
+    /(^|\s)git\s+rebase(\s|$)/,
+    /(^|\s)git\s+cherry-pick(\s|$)/,
+    /(^|\s)git\s+revert(\s|$)/,
+    /(^|\s)git\s+reset(\s|$)/,
+    /(^|\s)gh\s+pr\s+create(\s|$)/,
+    /(^|\s)gh\s+repo\s+fork(\s|$)/,
+  ].some((pattern) => pattern.test(normalized));
+}
+
+export function resolveExecutionPolicyGateReason(params: {
+  executionPolicy?: EmbeddedRunAttemptParams["executionPolicy"];
+  toolName: string;
+  toolArgs: unknown;
+}): string | undefined {
+  const policy = params.executionPolicy;
+  if (!policy?.requiresConfirmation) {
+    return undefined;
+  }
+
+  const toolName = params.toolName.trim().toLowerCase();
+  if (policy.writeIntent === "external" && EXTERNAL_CONFIRMATION_TOOL_NAMES.has(toolName)) {
+    return "Execution policy requires explicit user confirmation before external sends or writes. Ask the user to confirm this external action, then continue with an updated policy.";
+  }
+
+  if (policy.writeIntent === "git" && toolName === "exec") {
+    const args = params.toolArgs as { command?: unknown } | null;
+    const command = typeof args?.command === "string" ? args.command : "";
+    if (isGitMutationCommand(command)) {
+      return "Execution policy requires explicit user confirmation before git mutations such as commit, push, tag, merge, rebase, reset, revert, or PR creation. Ask the user to confirm, then continue with an updated policy.";
+    }
+  }
+
+  return undefined;
+}
+
+export function wrapToolsWithExecutionPolicyGate(params: {
+  tools: AnyAgentTool[];
+  executionPolicy?: EmbeddedRunAttemptParams["executionPolicy"];
+}): AnyAgentTool[] {
+  if (!params.executionPolicy?.requiresConfirmation) {
+    return params.tools;
+  }
+
+  return params.tools.map((tool) => {
+    const execute = tool.execute;
+    if (!execute) {
+      return tool;
+    }
+    return {
+      ...tool,
+      execute: async (toolCallId, args, signal, onUpdate) => {
+        const reason = resolveExecutionPolicyGateReason({
+          executionPolicy: params.executionPolicy,
+          toolName: tool.name || tool.label || "tool",
+          toolArgs: args,
+        });
+        if (reason) {
+          throw new Error(reason);
+        }
+        return execute(toolCallId, args, signal, onUpdate);
+      },
+    };
+  });
+}
+
 export function resolveRuntimeExecutionToolPolicy(params: {
   executionPolicy?: EmbeddedRunAttemptParams["executionPolicy"];
 }) {
@@ -897,8 +986,15 @@ export async function runEmbeddedAttempt(
           disableMessageTool: params.disableMessageTool,
         });
     const toolsEnabled = supportsModelTools(params.model);
+    const runtimeScopedTools = filterToolsByPolicy(
+      toolsEnabled ? toolsRaw : [],
+      runtimeExecutionToolPolicy,
+    );
     const tools = sanitizeToolsForGoogle({
-      tools: filterToolsByPolicy(toolsEnabled ? toolsRaw : [], runtimeExecutionToolPolicy),
+      tools: wrapToolsWithExecutionPolicyGate({
+        tools: runtimeScopedTools,
+        executionPolicy: params.executionPolicy,
+      }),
       provider: params.provider,
     });
     const clientTools = toolsEnabled ? params.clientTools : undefined;
