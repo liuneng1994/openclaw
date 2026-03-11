@@ -168,6 +168,33 @@ export type SessionEntry = {
   skillsSnapshot?: SessionSkillSnapshot;
   systemPromptReport?: SessionSystemPromptReport;
   acp?: SessionAcpMeta;
+  taskRouter?: {
+    latestTask?: {
+      id: string;
+      kind:
+        | "ask"
+        | "research_repo"
+        | "modify_code"
+        | "run_tests"
+        | "review_diff"
+        | "resume_task"
+        | "cancel_task";
+      status:
+        | "new"
+        | "planned"
+        | "running"
+        | "blocked"
+        | "waiting_user"
+        | "completed"
+        | "failed"
+        | "cancelled";
+      title: string;
+      conversationId: string;
+      createdAt: number;
+      updatedAt: number;
+      latestRunSessionId?: string;
+    };
+  };
 };
 
 function normalizeRuntimeField(value: string | undefined): string | undefined {

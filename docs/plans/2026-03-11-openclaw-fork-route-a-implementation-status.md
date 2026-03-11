@@ -106,3 +106,75 @@
 
 > 先在 OpenClaw fork 中种下正确的对象模型与协议层，
 > 让后续重构有清晰锚点，而不是继续在 prompt、tool、session 之间散着长功能。
+
+---
+
+# 第二刀更新：最小 task-aware router shim
+
+## 本轮新增
+
+### 1. 新增 `src/task/router.ts`
+
+已落地能力：
+
+- 为 session 维护一个最小 `taskRouter.latestTask` 快照
+- 当用户发起新的执行型请求时，记录最近 task
+- 当用户发送 `继续` 时，若存在最近 task，则把消息重写为“恢复最近任务”的内部提示
+- 当用户发送 `总结一下` 时，若存在最近 task，则把消息重写为“总结当前任务状态”的内部提示
+- 当用户发送 `停一下` / `取消` 时，更新最近 task 状态
+- 若未命中最近 task，则完全回退现有普通消息路径
+
+### 2. 已接入聊天主路径
+
+已接入位置：
+
+- `src/auto-reply/reply/get-reply-run.ts`
+
+接入方式：
+
+- 在进入 `runReplyAgent(...)` 之前，先做一次轻量 task 路由判定
+- 命中最近 task 时，重写 `commandBody`
+- 命中最近 task 且走队列路径时，同步重写 `queuedBody`
+- 把最新 `taskRouter` 快照写回 session store
+
+这意味着：
+
+- 现有 agent runtime、tool runtime、reply pipeline 基本未动
+- 新行为被压缩在很小的 shim 里，风险与回滚成本都较低
+
+### 3. 新增测试
+
+新增：
+
+- `src/task/router.test.ts`
+
+当前 task 模块测试结果：
+
+- `4` 个测试文件
+- `14/14 tests passed`
+
+## 当前限制
+
+本轮仍是**最小可用版**，尚未做到：
+
+- conversation 级多 task 列表
+- 真实 `TaskRecord` 持久化集合
+- `继续第 N 个任务`、`列出任务`、`停止当前任务` 等 richer control plane 语义
+- `ExecutionCommand / ExecutionEvent` 的完整 kernel 接线
+
+## 下一步建议
+
+### 下一刀：把 `latestTask` 升级为最小任务集合
+
+优先目标：
+
+- 不只记一个 `latestTask`
+- 支持 conversation 下多个 task 的最小索引
+- 为后续更强的控制语义打基础
+
+### 再下一刀：把 `ExecutionCommand / ExecutionEvent` 接入最小 kernel shim
+
+优先目标：
+
+- 先打通 planner 风格的最小执行通路
+- 验证控制平面 -> 协议层 -> 执行平面 的链路

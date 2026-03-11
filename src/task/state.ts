@@ -11,7 +11,7 @@ export function findLatestTaskForConversation(params: {
   statuses?: TaskRecord["status"][];
 }): TaskRecord | undefined {
   const allowed = params.statuses ? new Set(params.statuses) : undefined;
-  return sortTasksByUpdatedDesc(tasks).find(
+  return sortTasksByUpdatedDesc(params.tasks).find(
     (task) =>
       task.conversationId === params.conversationId && (allowed ? allowed.has(task.status) : true),
   );

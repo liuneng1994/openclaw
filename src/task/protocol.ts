@@ -5,6 +5,8 @@ import {
   RUN_SESSION_STATUSES,
   TASK_KINDS,
   TASK_STATUSES,
+  type AgentProfileId,
+  type RunSessionStatus,
   type TaskKind,
 } from "./types.js";
 
@@ -187,7 +189,7 @@ export function createExecutionCommand(input: {
   goal: string;
   runSessionId?: string;
   parentRunSessionId?: string;
-  agentProfile?: Static<typeof stringEnum<typeof AGENT_PROFILE_IDS>>;
+  agentProfile?: AgentProfileId;
   correlationId?: string;
 }): ExecutionCommand {
   return {
@@ -210,7 +212,7 @@ export function createExecutionEvent(input: {
   parentRunSessionId?: string;
   correlationId?: string;
   message?: string;
-  status?: Static<typeof stringEnum<typeof RUN_SESSION_STATUSES>>;
+  status?: RunSessionStatus;
 }): ExecutionEvent {
   return {
     type: input.type,

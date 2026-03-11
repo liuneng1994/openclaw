@@ -18,6 +18,7 @@ import {
 import { logVerbose } from "../../globals.js";
 import { clearCommandLane, getQueueSize } from "../../process/command-queue.js";
 import { normalizeMainKey } from "../../routing/session-key.js";
+import { applyTaskRouterSnapshot, resolveTaskRouterDecision } from "../../task/router.js";
 import { isReasoningTagProvider } from "../../utils/provider-utils.js";
 import { hasControlCommand } from "../command-detection.js";
 import { buildInboundMediaNote } from "../media-note.js";
@@ -386,6 +387,12 @@ export async function runPreparedReply(
   let prefixedCommandBody = mediaNote
     ? [mediaNote, mediaReplyHint, prefixedBody ?? ""].filter(Boolean).join("\n").trim()
     : prefixedBody;
+  const taskRouterDecision = resolveTaskRouterDecision({
+    text: prefixedCommandBody,
+    conversationId: sessionKey ?? sessionId ?? normalizeMainKey(agentId),
+    sessionEntry,
+  });
+  prefixedCommandBody = taskRouterDecision.rewrittenText;
   if (!resolvedThinkLevel) {
     resolvedThinkLevel = await modelState.resolveDefaultThinkingLevel();
   }
@@ -401,10 +408,11 @@ export async function runPreparedReply(
     if (sessionEntry && sessionStore && sessionKey && sessionEntry.thinkingLevel === "xhigh") {
       sessionEntry.thinkingLevel = "high";
       sessionEntry.updatedAt = Date.now();
-      sessionStore[sessionKey] = sessionEntry;
+      const nextSessionEntry = sessionEntry;
+      sessionStore[sessionKey] = nextSessionEntry;
       if (storePath) {
         await updateSessionStore(storePath, (store) => {
-          store[sessionKey] = sessionEntry;
+          store[sessionKey] = nextSessionEntry;
         });
       }
     }
@@ -423,6 +431,22 @@ export async function runPreparedReply(
       defaultModel,
     });
   }
+  if (sessionEntry && sessionStore && sessionKey) {
+    const nextSessionEntry = applyTaskRouterSnapshot({
+      entry: sessionEntry,
+      snapshot: taskRouterDecision.snapshot,
+    });
+    sessionEntry = nextSessionEntry;
+    sessionStore[sessionKey] = nextSessionEntry;
+    if (storePath) {
+      await updateSessionStore(storePath, (store) => {
+        store[sessionKey] = applyTaskRouterSnapshot({
+          entry: store[sessionKey],
+          snapshot: taskRouterDecision.snapshot,
+        });
+      });
+    }
+  }
   const sessionIdFinal = sessionId ?? crypto.randomUUID();
   const sessionFile = resolveSessionFilePath(
     sessionIdFinal,
@@ -432,9 +456,12 @@ export async function runPreparedReply(
   // Use bodyWithEvents (events prepended, but no session hints / untrusted context) so
   // deferred turns receive system events while keeping the same scope as effectiveBaseBody did.
   const queueBodyBase = [threadContextNote, bodyWithEvents].filter(Boolean).join("\n\n");
-  const queuedBody = mediaNote
+  let queuedBody = mediaNote
     ? [mediaNote, mediaReplyHint, queueBodyBase].filter(Boolean).join("\n").trim()
     : queueBodyBase;
+  if (taskRouterDecision.matchedExistingTask) {
+    queuedBody = taskRouterDecision.rewrittenText;
+  }
   const resolvedQueue = resolveQueueSettings({
     cfg,
     channel: sessionCtx.Provider,
