@@ -247,6 +247,76 @@ describe("task/router", () => {
     expect(decision.rewrittenText).toBe("继续");
   });
 
+  it("does not resume a cancelled latest task and falls back to the next resumable one", () => {
+    const entry: SessionEntry = {
+      sessionId: "session-1",
+      updatedAt: 1,
+      taskRouter: {
+        latestTask: {
+          id: "task-cancelled",
+          kind: "modify_code",
+          status: "cancelled",
+          title: "cancelled task",
+          conversationId: "telegram:1",
+          createdAt: 1,
+          updatedAt: 3,
+          latestRunSessionId: "run-cancelled",
+          latestRunSession: {
+            id: "run-cancelled",
+            status: "cancelled",
+            agentProfile: "builder",
+            updatedAt: 3,
+          },
+        },
+        recentTasks: [
+          {
+            id: "task-cancelled",
+            kind: "modify_code",
+            status: "cancelled",
+            title: "cancelled task",
+            conversationId: "telegram:1",
+            createdAt: 1,
+            updatedAt: 3,
+            latestRunSessionId: "run-cancelled",
+            latestRunSession: {
+              id: "run-cancelled",
+              status: "cancelled",
+              agentProfile: "builder",
+              updatedAt: 3,
+            },
+          },
+          {
+            id: "task-waiting",
+            kind: "run_tests",
+            status: "waiting_user",
+            title: "run tests",
+            conversationId: "telegram:1",
+            createdAt: 1,
+            updatedAt: 2,
+            latestRunSessionId: "run-waiting",
+            latestRunSession: {
+              id: "run-waiting",
+              status: "paused",
+              agentProfile: "builder",
+              updatedAt: 2,
+            },
+          },
+        ],
+      },
+    };
+
+    const decision = resolveTaskRouterDecision({
+      text: "继续",
+      conversationId: "telegram:1",
+      sessionEntry: entry,
+    });
+
+    expect(decision.matchedExistingTask).toBe(true);
+    expect(decision.rewrittenText).toContain("Task ID: task-waiting");
+    expect(decision.snapshot.latestTask?.id).toBe("task-waiting");
+    expect(decision.snapshot.latestTask?.status).toBe("running");
+  });
+
   it("persists task router snapshots onto session entries", () => {
     const next = applyTaskRouterSnapshot({
       entry: {

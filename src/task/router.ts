@@ -8,6 +8,7 @@ import {
 } from "./protocol.js";
 import {
   deriveTaskTitle,
+  isResumableTaskStatus,
   resolveAgentProfileForTaskKind,
   resolveRunSessionStatusForTaskKind,
   type TaskRecord,
@@ -118,6 +119,13 @@ function normalizeSnapshot(snapshot: TaskRouterSnapshot | undefined): TaskRouter
   };
 }
 
+function findLatestResumableTask(snapshot: TaskRouterSnapshot): TaskRecord | undefined {
+  if (snapshot.latestTask && isResumableTaskStatus(snapshot.latestTask.status)) {
+    return snapshot.latestTask;
+  }
+  return snapshot.recentTasks?.find((task) => isResumableTaskStatus(task.status));
+}
+
 function withTaskRouterSnapshot(
   entry: SessionEntry | undefined,
   snapshot: TaskRouterSnapshot,
@@ -145,19 +153,20 @@ export function resolveTaskRouterDecision(input: {
   let recentTasks = snapshot.recentTasks ?? [];
   let rewrittenText = input.text;
   let matchedExistingTask = false;
+  const resumableTask = findLatestResumableTask(snapshot);
 
-  if (controlAction?.type === "continue" && latestTask) {
+  if (controlAction?.type === "continue" && resumableTask) {
     latestTask = {
-      ...latestTask,
+      ...resumableTask,
       status: "running",
       updatedAt: Date.now(),
     };
     recentTasks = upsertRecentTasks(recentTasks, latestTask);
     rewrittenText = buildResumePrompt(latestTask);
     matchedExistingTask = true;
-  } else if (controlAction?.type === "request_summary" && latestTask) {
+  } else if (controlAction?.type === "request_summary" && resumableTask) {
     latestTask = {
-      ...latestTask,
+      ...resumableTask,
       updatedAt: Date.now(),
     };
     recentTasks = upsertRecentTasks(recentTasks, latestTask);
