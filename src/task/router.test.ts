@@ -82,6 +82,112 @@ describe("task/router", () => {
     expect(decision.snapshot.recentTasks?.[0]?.status).toBe("running");
   });
 
+  it("marks the latest task as paused for 停一下", () => {
+    const entry: SessionEntry = {
+      sessionId: "session-1",
+      updatedAt: 1,
+      taskRouter: {
+        latestTask: {
+          id: "task-1",
+          kind: "modify_code",
+          status: "running",
+          title: "fix router",
+          conversationId: "telegram:1",
+          createdAt: 1,
+          updatedAt: 2,
+          latestRunSessionId: "run-1",
+          latestRunSession: {
+            id: "run-1",
+            status: "building",
+            agentProfile: "builder",
+            updatedAt: 2,
+          },
+        },
+        recentTasks: [
+          {
+            id: "task-1",
+            kind: "modify_code",
+            status: "running",
+            title: "fix router",
+            conversationId: "telegram:1",
+            createdAt: 1,
+            updatedAt: 2,
+            latestRunSessionId: "run-1",
+            latestRunSession: {
+              id: "run-1",
+              status: "building",
+              agentProfile: "builder",
+              updatedAt: 2,
+            },
+          },
+        ],
+      },
+    };
+
+    const decision = resolveTaskRouterDecision({
+      text: "停一下",
+      conversationId: "telegram:1",
+      sessionEntry: entry,
+    });
+
+    expect(decision.controlAction?.type).toBe("pause");
+    expect(decision.snapshot.latestTask?.status).toBe("waiting_user");
+    expect(decision.snapshot.recentTasks?.[0]?.status).toBe("waiting_user");
+  });
+
+  it("marks the latest task as cancelled for 取消", () => {
+    const entry: SessionEntry = {
+      sessionId: "session-1",
+      updatedAt: 1,
+      taskRouter: {
+        latestTask: {
+          id: "task-1",
+          kind: "modify_code",
+          status: "running",
+          title: "fix router",
+          conversationId: "telegram:1",
+          createdAt: 1,
+          updatedAt: 2,
+          latestRunSessionId: "run-1",
+          latestRunSession: {
+            id: "run-1",
+            status: "building",
+            agentProfile: "builder",
+            updatedAt: 2,
+          },
+        },
+        recentTasks: [
+          {
+            id: "task-1",
+            kind: "modify_code",
+            status: "running",
+            title: "fix router",
+            conversationId: "telegram:1",
+            createdAt: 1,
+            updatedAt: 2,
+            latestRunSessionId: "run-1",
+            latestRunSession: {
+              id: "run-1",
+              status: "building",
+              agentProfile: "builder",
+              updatedAt: 2,
+            },
+          },
+        ],
+      },
+    };
+
+    const decision = resolveTaskRouterDecision({
+      text: "取消",
+      conversationId: "telegram:1",
+      sessionEntry: entry,
+    });
+
+    expect(decision.taskIntent.kind).toBe("cancel_task");
+    expect(decision.snapshot.latestTask?.status).toBe("cancelled");
+    expect(decision.snapshot.recentTasks?.[0]?.status).toBe("cancelled");
+  });
+
   it("builds a task-list prompt from tracked tasks", () => {
     const entry: SessionEntry = {
       sessionId: "session-1",

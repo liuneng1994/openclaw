@@ -18,7 +18,11 @@ import {
 import { logVerbose } from "../../globals.js";
 import { clearCommandLane, getQueueSize } from "../../process/command-queue.js";
 import { normalizeMainKey } from "../../routing/session-key.js";
-import { applyTaskRouterSnapshot, resolveTaskRouterDecision } from "../../task/router.js";
+import {
+  applyTaskRouterSnapshot,
+  resolveTaskRouterDecision,
+  updateTaskRouterRunProgress,
+} from "../../task/router.js";
 import { isReasoningTagProvider } from "../../utils/provider-utils.js";
 import { hasControlCommand } from "../command-detection.js";
 import { buildInboundMediaNote } from "../media-note.js";
@@ -85,6 +89,21 @@ function resolveResetSessionNoticeRoute(params: {
     return null;
   }
   return { channel, to };
+}
+
+function buildTaskControlAck(params: {
+  action: "pause" | "cancel";
+  title?: string;
+  aborted?: boolean;
+}): string {
+  const titleSuffix = params.title ? `：${params.title}` : "";
+  if (params.action === "pause") {
+    return `已先停在这里，Master。任务已标记为暂停待命${titleSuffix}；您稍后发“继续”即可从最近上下文接着推进。`;
+  }
+  if (params.aborted) {
+    return `已执行取消，Master。当前任务已标记为取消，并已尝试中断正在进行的运行${titleSuffix}。`;
+  }
+  return `已执行取消，Master。当前任务已标记为取消${titleSuffix}；此刻没有发现可中断的活动运行。`;
 }
 
 async function sendResetSessionNotice(params: {
@@ -446,6 +465,76 @@ export async function runPreparedReply(
         });
       });
     }
+  }
+
+  const controlAction = taskRouterDecision.controlAction;
+  const latestTask = sessionEntry?.taskRouter?.latestTask;
+  if (
+    sessionEntry &&
+    sessionStore &&
+    sessionKey &&
+    latestTask &&
+    (controlAction?.type === "pause" || taskRouterDecision.taskIntent.kind === "cancel_task")
+  ) {
+    const nextRunStatus = controlAction?.type === "pause" ? "paused" : "cancelled";
+    const nextTaskStatus = controlAction?.type === "pause" ? "waiting_user" : "cancelled";
+    let nextSessionEntry = updateTaskRouterRunProgress({
+      entry: sessionEntry,
+      taskId: latestTask.id,
+      runSessionId: latestTask.latestRunSessionId,
+      runStatus: nextRunStatus,
+      taskStatus: nextTaskStatus,
+    });
+
+    const sessionIdForAbort = sessionEntry.sessionId ?? sessionId;
+    let aborted = false;
+    if (taskRouterDecision.taskIntent.kind === "cancel_task" && sessionIdForAbort) {
+      aborted = abortEmbeddedPiRun(sessionIdForAbort);
+      const laneKey = resolveEmbeddedSessionLane(sessionKey);
+      clearCommandLane(laneKey);
+      if (nextSessionEntry) {
+        nextSessionEntry = {
+          ...nextSessionEntry,
+          abortedLastRun: aborted || nextSessionEntry.abortedLastRun,
+          updatedAt: Date.now(),
+        };
+      }
+    }
+
+    if (nextSessionEntry) {
+      sessionEntry = nextSessionEntry;
+      sessionStore[sessionKey] = nextSessionEntry;
+      if (storePath) {
+        await updateSessionStore(storePath, (store) => {
+          const updated = updateTaskRouterRunProgress({
+            entry: store[sessionKey],
+            taskId: latestTask.id,
+            runSessionId: latestTask.latestRunSessionId,
+            runStatus: nextRunStatus,
+            taskStatus: nextTaskStatus,
+          });
+          if (updated) {
+            store[sessionKey] = {
+              ...updated,
+              abortedLastRun:
+                taskRouterDecision.taskIntent.kind === "cancel_task"
+                  ? aborted || updated.abortedLastRun
+                  : updated.abortedLastRun,
+              updatedAt: Date.now(),
+            };
+          }
+        });
+      }
+    }
+
+    typing.cleanup();
+    return {
+      text: buildTaskControlAck({
+        action: controlAction?.type === "pause" ? "pause" : "cancel",
+        title: latestTask.title,
+        aborted,
+      }),
+    };
   }
   const sessionIdFinal = sessionId ?? crypto.randomUUID();
   const sessionFile = resolveSessionFilePath(
