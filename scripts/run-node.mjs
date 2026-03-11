@@ -176,6 +176,38 @@ const logRunner = (message, deps) => {
   deps.stderr.write(`[openclaw] ${message}\n`);
 };
 
+const hasRunnableCommand = (command, args, deps) => {
+  try {
+    const result = deps.spawnSync(command, args, {
+      cwd: deps.cwd,
+      env: deps.env,
+      stdio: "ignore",
+    });
+    return !result.error;
+  } catch {
+    return false;
+  }
+};
+
+const resolveBuildInvocation = (deps) => {
+  if (deps.platform === "win32") {
+    return {
+      command: "cmd.exe",
+      args: ["/d", "/s", "/c", "pnpm", ...compilerArgs],
+    };
+  }
+  if (hasRunnableCommand("pnpm", ["--version"], deps)) {
+    return {
+      command: "pnpm",
+      args: compilerArgs,
+    };
+  }
+  return {
+    command: "corepack",
+    args: ["pnpm", ...compilerArgs],
+  };
+};
+
 const runOpenClaw = async (deps) => {
   const nodeProcess = deps.spawn(deps.execPath, ["openclaw.mjs", ...deps.args], {
     cwd: deps.cwd,
@@ -231,10 +263,8 @@ export async function runNodeMain(params = {}) {
   }
 
   logRunner("Building TypeScript (dist is stale).", deps);
-  const buildCmd = deps.platform === "win32" ? "cmd.exe" : "pnpm";
-  const buildArgs =
-    deps.platform === "win32" ? ["/d", "/s", "/c", "pnpm", ...compilerArgs] : compilerArgs;
-  const build = deps.spawn(buildCmd, buildArgs, {
+  const buildInvocation = resolveBuildInvocation(deps);
+  const build = deps.spawn(buildInvocation.command, buildInvocation.args, {
     cwd: deps.cwd,
     env: deps.env,
     stdio: "inherit",

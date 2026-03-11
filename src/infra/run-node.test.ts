@@ -26,8 +26,8 @@ describe("run-node script", () => {
 
         const nodeCalls: string[][] = [];
         const spawn = (cmd: string, args: string[]) => {
-          if (cmd === "pnpm") {
-            fsSync.writeFileSync(argsPath, args.join(" "), "utf-8");
+          if (cmd === "pnpm" || cmd === "corepack") {
+            fsSync.writeFileSync(argsPath, [cmd, ...args].join(" "), "utf-8");
             if (!args.includes("--no-clean")) {
               fsSync.rmSync(path.join(tmp, "dist", "control-ui"), { recursive: true, force: true });
             }
@@ -44,6 +44,10 @@ describe("run-node script", () => {
             },
           };
         };
+        const spawnSync = (cmd: string) => ({
+          status: cmd === "pnpm" ? 0 : 1,
+          stdout: "",
+        });
 
         const { runNodeMain } = await import("../../scripts/run-node.mjs");
         const exitCode = await runNodeMain({
@@ -55,14 +59,66 @@ describe("run-node script", () => {
             OPENCLAW_RUNNER_LOG: "0",
           },
           spawn,
+          spawnSync,
           execPath: process.execPath,
           platform: process.platform,
         });
 
         expect(exitCode).toBe(0);
-        await expect(fs.readFile(argsPath, "utf-8")).resolves.toContain("exec tsdown --no-clean");
+        await expect(fs.readFile(argsPath, "utf-8")).resolves.toContain(
+          "pnpm exec tsdown --no-clean",
+        );
         await expect(fs.readFile(indexPath, "utf-8")).resolves.toContain("sentinel");
         expect(nodeCalls).toEqual([[process.execPath, "openclaw.mjs", "--version"]]);
+      });
+    },
+  );
+
+  it.runIf(process.platform !== "win32")(
+    "falls back to corepack pnpm when pnpm is not directly runnable",
+    async () => {
+      await withTempDir(async (tmp) => {
+        const argsPath = path.join(tmp, ".pnpm-args.txt");
+        await fs.mkdir(path.join(tmp, "dist"), { recursive: true });
+
+        const spawn = (cmd: string, args: string[]) => {
+          if (cmd === "corepack") {
+            fsSync.writeFileSync(argsPath, [cmd, ...args].join(" "), "utf-8");
+          }
+          return {
+            on: (event: string, cb: (code: number | null, signal: string | null) => void) => {
+              if (event === "exit") {
+                queueMicrotask(() => cb(0, null));
+              }
+              return undefined;
+            },
+          };
+        };
+        const spawnSync = (cmd: string) => ({
+          status: cmd === "corepack" ? 0 : 1,
+          stdout: "",
+          error: cmd === "pnpm" ? new Error("ENOENT") : undefined,
+        });
+
+        const { runNodeMain } = await import("../../scripts/run-node.mjs");
+        const exitCode = await runNodeMain({
+          cwd: tmp,
+          args: ["--version"],
+          env: {
+            ...process.env,
+            OPENCLAW_FORCE_BUILD: "1",
+            OPENCLAW_RUNNER_LOG: "0",
+          },
+          spawn,
+          spawnSync,
+          execPath: process.execPath,
+          platform: process.platform,
+        });
+
+        expect(exitCode).toBe(0);
+        await expect(fs.readFile(argsPath, "utf-8")).resolves.toContain(
+          "corepack pnpm exec tsdown --no-clean",
+        );
       });
     },
   );
