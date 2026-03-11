@@ -20,6 +20,8 @@ export const CONTROL_ACTIONS = [
   "inject_feedback",
   "request_summary",
   "list_tasks",
+  "confirm_execution",
+  "reject_execution",
 ] as const;
 
 export type ControlActionType = (typeof CONTROL_ACTIONS)[number];
@@ -114,6 +116,12 @@ const PAUSE_PREFIXES = [/^停一下/u, /^暂停/u, /^pause(?:\b|\s|$)/iu];
 const SUMMARY_PREFIXES = [/^总结一下/u, /^总结/u, /^summary(?:\b|\s|$)/iu];
 const TASK_LIST_PREFIXES = [/^任务列表/u, /^列出任务/u, /^list tasks?(?:\b|\s|$)/iu];
 const CANCEL_PREFIXES = [/^取消/u, /^停止任务/u, /^cancel(?:\b|\s|$)/iu];
+const CONFIRM_EXECUTION_PREFIXES = [
+  /^确认执行[\s，,。.!！?？]*$/u,
+  /^可以执行[\s，,。.!！?？]*$/u,
+  /^执行吧[\s，,。.!！?？]*$/u,
+];
+const REJECT_EXECUTION_PREFIXES = [/^先别执行/u, /^暂停这个/u];
 
 export function inferTaskIntent(input: {
   text: string;
@@ -180,6 +188,12 @@ export function inferControlAction(input: {
   }
   if (TASK_LIST_PREFIXES.some((re) => re.test(text))) {
     return { type: "list_tasks", ...base };
+  }
+  if (CONFIRM_EXECUTION_PREFIXES.some((re) => re.test(text))) {
+    return { type: "confirm_execution", ...base };
+  }
+  if (REJECT_EXECUTION_PREFIXES.some((re) => re.test(text))) {
+    return { type: "reject_execution", ...base };
   }
   if (text.startsWith("只分析") || /^readonly(?:\b|\s|$)/iu.test(text)) {
     return { type: "downgrade_to_readonly", ...base };

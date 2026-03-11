@@ -125,6 +125,7 @@ import { dropThinkingBlocks } from "../thinking.js";
 import { collectAllowedToolNames } from "../tool-name-allowlist.js";
 import { installToolResultContextGuard } from "../tool-result-context-guard.js";
 import { splitSdkTools } from "../tool-split.js";
+import type { EmbeddedPiPendingApproval } from "../types.js";
 import { describeUnknownError, mapThinkingLevel } from "../utils.js";
 import { flushPendingToolResultsAfterIdle } from "../wait-for-idle-before-flush.js";
 import { waitForCompactionRetryWithAggregateTimeout } from "./compaction-retry-aggregate-timeout.js";
@@ -672,11 +673,11 @@ export function isGitMutationCommand(command: string): boolean {
   ].some((pattern) => pattern.test(normalized));
 }
 
-export function resolveExecutionPolicyGateReason(params: {
+export function resolveExecutionPolicyPendingApproval(params: {
   executionPolicy?: EmbeddedRunAttemptParams["executionPolicy"];
   toolName: string;
   toolArgs: unknown;
-}): string | undefined {
+}): EmbeddedPiPendingApproval | undefined {
   const policy = params.executionPolicy;
   if (!policy?.requiresConfirmation) {
     return undefined;
@@ -684,23 +685,45 @@ export function resolveExecutionPolicyGateReason(params: {
 
   const toolName = params.toolName.trim().toLowerCase();
   if (policy.writeIntent === "external" && EXTERNAL_CONFIRMATION_TOOL_NAMES.has(toolName)) {
-    return "Execution policy requires explicit user confirmation before external sends or writes. Ask the user to confirm this external action, then continue with an updated policy.";
+    return {
+      kind: "external",
+      summary: `external action via ${toolName}`,
+    };
   }
 
   if (policy.writeIntent === "git" && toolName === "exec") {
     const args = params.toolArgs as { command?: unknown } | null;
     const command = typeof args?.command === "string" ? args.command : "";
     if (isGitMutationCommand(command)) {
-      return "Execution policy requires explicit user confirmation before git mutations such as commit, push, tag, merge, rebase, reset, revert, or PR creation. Ask the user to confirm, then continue with an updated policy.";
+      return {
+        kind: "git",
+        summary: command.trim() || "git mutation",
+      };
     }
   }
 
   return undefined;
 }
 
+export function resolveExecutionPolicyGateReason(params: {
+  executionPolicy?: EmbeddedRunAttemptParams["executionPolicy"];
+  toolName: string;
+  toolArgs: unknown;
+}): string | undefined {
+  const pendingApproval = resolveExecutionPolicyPendingApproval(params);
+  if (!pendingApproval) {
+    return undefined;
+  }
+  if (pendingApproval.kind === "external") {
+    return "Execution policy requires explicit user confirmation before external sends or writes. Ask the user to confirm this external action, then continue with an updated policy.";
+  }
+  return "Execution policy requires explicit user confirmation before git mutations such as commit, push, tag, merge, rebase, reset, revert, or PR creation. Ask the user to confirm, then continue with an updated policy.";
+}
+
 export function wrapToolsWithExecutionPolicyGate(params: {
   tools: AnyAgentTool[];
   executionPolicy?: EmbeddedRunAttemptParams["executionPolicy"];
+  onBlockedAction?: (approval: EmbeddedPiPendingApproval) => void;
 }): AnyAgentTool[] {
   if (!params.executionPolicy?.requiresConfirmation) {
     return params.tools;
@@ -714,13 +737,20 @@ export function wrapToolsWithExecutionPolicyGate(params: {
     return {
       ...tool,
       execute: async (toolCallId, args, signal, onUpdate) => {
-        const reason = resolveExecutionPolicyGateReason({
+        const approval = resolveExecutionPolicyPendingApproval({
           executionPolicy: params.executionPolicy,
           toolName: tool.name || tool.label || "tool",
           toolArgs: args,
         });
-        if (reason) {
-          throw new Error(reason);
+        if (approval) {
+          params.onBlockedAction?.(approval);
+          throw new Error(
+            resolveExecutionPolicyGateReason({
+              executionPolicy: params.executionPolicy,
+              toolName: tool.name || tool.label || "tool",
+              toolArgs: args,
+            }),
+          );
         }
         return execute(toolCallId, args, signal, onUpdate);
       },
@@ -939,6 +969,7 @@ export async function runEmbeddedAttempt(
     });
     // Check if the model supports native image input
     const modelHasVision = params.model.input?.includes("image") ?? false;
+    let pendingApproval: EmbeddedPiPendingApproval | undefined;
     const runtimeExecutionToolPolicy = resolveRuntimeExecutionToolPolicy({
       executionPolicy: params.executionPolicy,
     });
@@ -994,6 +1025,9 @@ export async function runEmbeddedAttempt(
       tools: wrapToolsWithExecutionPolicyGate({
         tools: runtimeScopedTools,
         executionPolicy: params.executionPolicy,
+        onBlockedAction: (approval) => {
+          pendingApproval = approval;
+        },
       }),
       provider: params.provider,
     });
@@ -2165,6 +2199,7 @@ export async function runEmbeddedAttempt(
         lastAssistant,
         lastToolError: getLastToolError?.(),
         didSendViaMessagingTool: didSendViaMessagingTool(),
+        pendingApproval,
         messagingToolSentTexts: getMessagingToolSentTexts(),
         messagingToolSentMediaUrls: getMessagingToolSentMediaUrls(),
         messagingToolSentTargets: getMessagingToolSentTargets(),

@@ -20,7 +20,7 @@ import { emitDiagnosticEvent, isDiagnosticsEnabled } from "../../infra/diagnosti
 import { generateSecureUuid } from "../../infra/secure-random.js";
 import { enqueueSystemEvent } from "../../infra/system-events.js";
 import { defaultRuntime } from "../../runtime.js";
-import { updateTaskRouterRunProgress } from "../../task/router.js";
+import { updateTaskRouterPendingApproval, updateTaskRouterRunProgress } from "../../task/router.js";
 import { estimateUsageCost, resolveModelCostConfig } from "../../utils/usage-format.js";
 import {
   buildFallbackClearedNotice,
@@ -260,6 +260,42 @@ export async function runReplyAgent(params: {
     agentCfgContextTokens,
   });
 
+  const persistPendingApproval = async (pendingApproval?: {
+    kind: "git" | "external";
+    summary: string;
+  }) => {
+    if (!activeSessionStore || !sessionKey) {
+      return;
+    }
+    const approvalState = pendingApproval
+      ? {
+          ...pendingApproval,
+          taskId: latestTaskId,
+          runSessionId: latestRunSessionId,
+          createdAt: Date.now(),
+        }
+      : undefined;
+    const nextEntry = updateTaskRouterPendingApproval({
+      entry: activeSessionEntry,
+      pendingApproval: approvalState,
+    });
+    if (nextEntry) {
+      activeSessionEntry = nextEntry;
+      activeSessionStore[sessionKey] = nextEntry;
+    }
+    if (storePath) {
+      await updateSessionStoreEntry({
+        storePath,
+        sessionKey,
+        update: async (entry) =>
+          updateTaskRouterPendingApproval({
+            entry,
+            pendingApproval: approvalState,
+          }) ?? {},
+      });
+    }
+  };
+
   const persistTaskRunProgress = async (params: {
     runStatus:
       | "created"
@@ -471,6 +507,8 @@ export async function runReplyAgent(params: {
         });
       }
     }
+
+    await persistPendingApproval(runResult.meta?.pendingApproval);
 
     const payloadArray = runResult.payloads ?? [];
 

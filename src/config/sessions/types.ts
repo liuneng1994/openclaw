@@ -255,6 +255,13 @@ export type SessionEntry = {
         updatedAt: number;
       };
     }>;
+    pendingApproval?: {
+      kind: "git" | "external";
+      taskId?: string;
+      runSessionId?: string;
+      summary: string;
+      createdAt: number;
+    };
   };
 };
 

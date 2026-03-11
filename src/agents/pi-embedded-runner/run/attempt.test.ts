@@ -701,7 +701,7 @@ describe("execution policy confirmation gates", () => {
           label: "message",
           description: "send message",
           parameters: { type: "object", properties: {} },
-          execute: vi.fn(async () => ({ ok: true })),
+          execute: vi.fn(async () => ({ content: [], details: {} })),
         },
       ] satisfies AnyAgentTool[],
     });

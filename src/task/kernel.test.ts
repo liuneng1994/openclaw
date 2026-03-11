@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveExecutionKernelPlan } from "./kernel.js";
+import { resolveExecutionKernelPlan, resolveExecutionPolicyToolPolicy } from "./kernel.js";
 import type { TaskRouterDecision } from "./router.js";
 
 function buildDecision(overrides: Partial<TaskRouterDecision>): TaskRouterDecision {
@@ -89,6 +89,52 @@ describe("task/kernel", () => {
     expect(plan.promptText).toContain("Command Type: resume_session");
   });
 
+  it("builds a confirmation-backed resume plan", () => {
+    const plan = resolveExecutionKernelPlan({
+      decision: buildDecision({
+        controlAction: {
+          type: "confirm_execution",
+          conversationId: "telegram:1",
+          taskId: "task-1",
+          runSessionId: "run-1",
+        },
+        snapshot: {
+          latestTask: {
+            id: "task-1",
+            kind: "modify_code",
+            status: "waiting_user",
+            title: "fix router",
+            conversationId: "telegram:1",
+            createdAt: 1,
+            updatedAt: 2,
+            latestRunSessionId: "run-1",
+            latestRunSession: {
+              id: "run-1",
+              status: "paused",
+              agentProfile: "builder",
+              updatedAt: 2,
+            },
+          },
+          recentTasks: [],
+          pendingApproval: {
+            kind: "git",
+            summary: 'git commit -m "x"',
+            createdAt: 3,
+          },
+        },
+      }),
+      originalPrompt: "[Task Router]\nconfirmed execution",
+    });
+
+    expect(plan.command?.type).toBe("resume_session");
+    expect(plan.policy).toMatchObject({
+      mode: "ask",
+      risk: "high",
+      writeIntent: "git",
+      requiresConfirmation: false,
+    });
+  });
+
   it("builds a request_summary plan for summary control", () => {
     const plan = resolveExecutionKernelPlan({
       decision: buildDecision({
@@ -158,6 +204,19 @@ describe("task/kernel", () => {
     });
     expect(plan.execOverrides).toMatchObject({
       ask: "always",
+    });
+  });
+
+  it("derives a readonly runtime tool denylist", () => {
+    const toolPolicy = resolveExecutionPolicyToolPolicy({
+      mode: "readonly",
+      risk: "low",
+      writeIntent: "none",
+      requiresConfirmation: false,
+    });
+
+    expect(toolPolicy).toMatchObject({
+      deny: expect.arrayContaining(["write", "edit", "apply_patch", "message"]),
     });
   });
 

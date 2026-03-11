@@ -7,6 +7,7 @@ import type { ContextEngine } from "../../../context-engine/types.js";
 import type { PluginHookBeforeAgentStartResult } from "../../../plugins/types.js";
 import type { MessagingToolSend } from "../../pi-embedded-messaging.js";
 import type { NormalizedUsage } from "../../usage.js";
+import type { EmbeddedPiPendingApproval } from "../types.js";
 import type { RunEmbeddedPiAgentParams } from "./params.js";
 
 type EmbeddedRunAttemptBase = Omit<
@@ -55,6 +56,7 @@ export type EmbeddedRunAttemptResult = {
   };
   didSendViaMessagingTool: boolean;
   didSendDeterministicApprovalPrompt?: boolean;
+  pendingApproval?: EmbeddedPiPendingApproval;
   messagingToolSentTexts: string[];
   messagingToolSentMediaUrls: string[];
   messagingToolSentTargets: MessagingToolSend[];

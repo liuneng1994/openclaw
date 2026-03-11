@@ -49,6 +49,17 @@ function resolveExecutionPolicy(params: {
     };
   }
 
+  if (params.decision.controlAction?.type === "confirm_execution") {
+    const approvalKind = params.decision.snapshot.pendingApproval?.kind;
+    return {
+      mode: "ask",
+      risk: "high",
+      writeIntent:
+        approvalKind === "git" || approvalKind === "external" ? approvalKind : "workspace",
+      requiresConfirmation: false,
+    };
+  }
+
   if (kind === "research_repo" || kind === "review_diff" || kind === "ask") {
     return {
       mode: "readonly",
@@ -220,7 +231,11 @@ function buildExecutionKernelPrompt(params: {
 function resolveExecutionCommandType(
   decision: TaskRouterDecision,
 ): ExecutionCommand["type"] | null {
-  if (decision.controlAction?.type === "continue" && decision.snapshot.latestTask) {
+  if (
+    (decision.controlAction?.type === "continue" ||
+      decision.controlAction?.type === "confirm_execution") &&
+    decision.snapshot.latestTask
+  ) {
     return "resume_session";
   }
   if (decision.controlAction?.type === "request_summary" && decision.snapshot.latestTask) {

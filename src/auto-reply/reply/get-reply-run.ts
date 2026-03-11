@@ -18,7 +18,7 @@ import {
 import { logVerbose } from "../../globals.js";
 import { clearCommandLane, getQueueSize } from "../../process/command-queue.js";
 import { normalizeMainKey } from "../../routing/session-key.js";
-import { resolveExecutionKernelPlan } from "../../task/kernel.js";
+import { resolveExecutionKernelPlan, type ExecutionPolicy } from "../../task/kernel.js";
 import {
   applyTaskRouterSnapshot,
   resolveTaskRouterDecision,
@@ -430,6 +430,7 @@ export async function runPreparedReply(
   let prefixedCommandBody = mediaNote
     ? [mediaNote, mediaReplyHint, prefixedBody ?? ""].filter(Boolean).join("\n").trim()
     : prefixedBody;
+  const sessionPendingApproval = sessionEntry?.taskRouter?.pendingApproval;
   const taskRouterDecision = resolveTaskRouterDecision({
     text: prefixedCommandBody,
     conversationId: sessionKey ?? sessionId ?? normalizeMainKey(agentId),
@@ -439,9 +440,18 @@ export async function runPreparedReply(
     decision: taskRouterDecision,
     originalPrompt: taskRouterDecision.rewrittenText,
   });
-  if (executionKernelPlan.policy) {
+  const resolvedExecutionPolicy: ExecutionPolicy | undefined =
+    taskRouterDecision.controlAction?.type === "confirm_execution" && sessionPendingApproval
+      ? {
+          mode: "ask",
+          risk: "high",
+          writeIntent: sessionPendingApproval.kind,
+          requiresConfirmation: false,
+        }
+      : executionKernelPlan.policy;
+  if (resolvedExecutionPolicy) {
     extraSystemPromptParts.push(
-      `[Execution Policy Snapshot]\nMode: ${executionKernelPlan.policy.mode}\nRisk: ${executionKernelPlan.policy.risk}\nWrite Intent: ${executionKernelPlan.policy.writeIntent}\nRequires Confirmation: ${executionKernelPlan.policy.requiresConfirmation}`,
+      `[Execution Policy Snapshot]\nMode: ${resolvedExecutionPolicy.mode}\nRisk: ${resolvedExecutionPolicy.risk}\nWrite Intent: ${resolvedExecutionPolicy.writeIntent}\nRequires Confirmation: ${resolvedExecutionPolicy.requiresConfirmation}`,
     );
   }
   prefixedCommandBody = executionKernelPlan.promptText ?? taskRouterDecision.rewrittenText;
@@ -510,6 +520,12 @@ export async function runPreparedReply(
     sessionId,
     sessionKey,
   });
+  if (controlAction?.type === "reject_execution" && sessionPendingApproval) {
+    typing.cleanup();
+    return {
+      text: `好的，已先不执行这次${sessionPendingApproval.kind === "git" ? "git 变更" : "外部动作"}。当前任务保持等待您下一步指令。`,
+    };
+  }
   const latestTask = activeTaskRun.latestTask;
   if (
     controlAction?.type === "continue" &&
@@ -695,7 +711,7 @@ export async function runPreparedReply(
       ownerNumbers: command.ownerList.length > 0 ? command.ownerList : undefined,
       inputProvenance: ctx.InputProvenance ?? sessionCtx.InputProvenance,
       extraSystemPrompt: extraSystemPromptParts.join("\n\n") || undefined,
-      executionPolicy: executionKernelPlan.policy,
+      executionPolicy: resolvedExecutionPolicy,
       ...(isReasoningTagProvider(provider) ? { enforceFinalTag: true } : {}),
     },
   };

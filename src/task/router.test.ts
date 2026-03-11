@@ -3,6 +3,7 @@ import type { SessionEntry } from "../config/sessions.js";
 import {
   applyTaskRouterSnapshot,
   resolveTaskRouterDecision,
+  updateTaskRouterPendingApproval,
   updateTaskRouterRunProgress,
 } from "./router.js";
 
@@ -235,6 +236,88 @@ describe("task/router", () => {
     expect(decision.rewrittenText).toContain("Tracked tasks:");
     expect(decision.rewrittenText).toContain("run tests");
     expect(decision.rewrittenText).toContain("fix router");
+  });
+
+  it("rewrites approval confirmation into a resume instruction when approval is pending", () => {
+    const entry: SessionEntry = {
+      sessionId: "session-1",
+      updatedAt: 1,
+      taskRouter: {
+        latestTask: {
+          id: "task-1",
+          kind: "modify_code",
+          status: "waiting_user",
+          title: "fix router",
+          conversationId: "telegram:1",
+          createdAt: 1,
+          updatedAt: 2,
+          latestRunSessionId: "run-1",
+          latestRunSession: {
+            id: "run-1",
+            status: "paused",
+            agentProfile: "builder",
+            updatedAt: 2,
+          },
+        },
+        recentTasks: [],
+        pendingApproval: {
+          kind: "git",
+          taskId: "task-1",
+          runSessionId: "run-1",
+          summary: 'git commit -m "x"',
+          createdAt: 3,
+        },
+      },
+    };
+
+    const decision = resolveTaskRouterDecision({
+      text: "确认执行",
+      conversationId: "telegram:1",
+      sessionEntry: entry,
+    });
+
+    expect(decision.controlAction?.type).toBe("confirm_execution");
+    expect(decision.matchedExistingTask).toBe(true);
+    expect(decision.snapshot.pendingApproval).toBeUndefined();
+    expect(decision.snapshot.latestTask?.status).toBe("running");
+    expect(decision.rewrittenText).toContain("previously blocked high-risk action");
+    expect(decision.rewrittenText).toContain("Approval Kind: git");
+  });
+
+  it("clears pending approval on rejection", () => {
+    const entry = updateTaskRouterPendingApproval({
+      entry: {
+        sessionId: "session-1",
+        updatedAt: 1,
+        taskRouter: {
+          latestTask: {
+            id: "task-1",
+            kind: "modify_code",
+            status: "running",
+            title: "fix router",
+            conversationId: "telegram:1",
+            createdAt: 1,
+            updatedAt: 2,
+          },
+          recentTasks: [],
+        },
+      },
+      pendingApproval: {
+        kind: "external",
+        summary: "message send",
+        createdAt: 3,
+      },
+    });
+
+    const decision = resolveTaskRouterDecision({
+      text: "先别执行",
+      conversationId: "telegram:1",
+      sessionEntry: entry,
+    });
+
+    expect(decision.controlAction?.type).toBe("reject_execution");
+    expect(decision.snapshot.pendingApproval).toBeUndefined();
+    expect(decision.snapshot.latestTask?.status).toBe("waiting_user");
   });
 
   it("falls back cleanly when continue has no matching task", () => {

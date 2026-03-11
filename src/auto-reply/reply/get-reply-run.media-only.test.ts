@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { SessionEntry } from "../../config/sessions/types.js";
 import { runPreparedReply } from "./get-reply-run.js";
 
 vi.mock("../../agents/auth-profiles/session-override.js", () => ({
@@ -264,6 +265,117 @@ describe("runPreparedReply media-only handling", () => {
     expect(call?.followupRun.run.extraSystemPrompt ?? "").toContain("[Execution Policy Snapshot]");
   });
 
+  it("resumes a pending approval with confirmation-friendly policy", async () => {
+    await runPreparedReply(
+      baseParams({
+        ctx: {
+          Body: "执行吧",
+          RawBody: "执行吧",
+          CommandBody: "执行吧",
+          ThreadHistoryBody: "",
+          OriginatingChannel: "slack",
+          OriginatingTo: "C123",
+          ChatType: "group",
+        },
+        sessionCtx: {
+          Body: "执行吧",
+          BodyStripped: "执行吧",
+          ThreadHistoryBody: "",
+          Provider: "slack",
+          ChatType: "group",
+          OriginatingChannel: "slack",
+          OriginatingTo: "C123",
+        },
+        sessionEntry: {
+          taskRouter: {
+            latestTask: {
+              id: "task-1",
+              kind: "modify_code",
+              status: "waiting_user",
+              title: "fix router",
+              conversationId: "session-key",
+              createdAt: 1,
+              updatedAt: 2,
+              latestRunSessionId: "run-1",
+              latestRunSession: {
+                id: "run-1",
+                status: "paused",
+                agentProfile: "builder",
+                updatedAt: 2,
+              },
+            },
+            recentTasks: [],
+            pendingApproval: {
+              kind: "git",
+              taskId: "task-1",
+              runSessionId: "run-1",
+              summary: 'git commit -m "x"',
+              createdAt: 3,
+            },
+          },
+        } as never,
+      }),
+    );
+
+    const call = vi.mocked(runReplyAgent).mock.calls[0]?.[0];
+    expect(call?.commandBody).toContain("Approval Kind: git");
+    expect(call?.followupRun.run.executionPolicy).toMatchObject({
+      mode: "ask",
+      risk: "high",
+      writeIntent: "git",
+      requiresConfirmation: false,
+    });
+  });
+
+  it("acknowledges approval rejection without starting a run", async () => {
+    const result = await runPreparedReply(
+      baseParams({
+        ctx: {
+          Body: "先别执行",
+          RawBody: "先别执行",
+          CommandBody: "先别执行",
+          ThreadHistoryBody: "",
+          OriginatingChannel: "slack",
+          OriginatingTo: "C123",
+          ChatType: "group",
+        },
+        sessionCtx: {
+          Body: "先别执行",
+          BodyStripped: "先别执行",
+          ThreadHistoryBody: "",
+          Provider: "slack",
+          ChatType: "group",
+          OriginatingChannel: "slack",
+          OriginatingTo: "C123",
+        },
+        sessionEntry: {
+          taskRouter: {
+            latestTask: {
+              id: "task-1",
+              kind: "modify_code",
+              status: "running",
+              title: "fix router",
+              conversationId: "session-key",
+              createdAt: 1,
+              updatedAt: 2,
+            },
+            recentTasks: [],
+            pendingApproval: {
+              kind: "external",
+              summary: "message send",
+              createdAt: 3,
+            },
+          },
+        } as never,
+      }),
+    );
+
+    expect(result).toEqual({
+      text: "好的，已先不执行这次外部动作。当前任务保持等待您下一步指令。",
+    });
+    expect(vi.mocked(runReplyAgent)).not.toHaveBeenCalled();
+  });
+
   it("allows media-only prompts and preserves thread context in queued followups", async () => {
     const result = await runPreparedReply(baseParams());
     expect(result).toEqual({ text: "ok" });
@@ -357,7 +469,7 @@ describe("runPreparedReply media-only handling", () => {
 
   it("does not start a duplicate run when 继续 targets an already active embedded run", async () => {
     vi.mocked(isEmbeddedPiRunActive).mockReturnValue(true);
-    const sessionStore = {
+    const sessionStore: Record<string, SessionEntry & { abortedLastRun?: boolean }> = {
       "session-key": {
         sessionId: "session-1",
         updatedAt: 1,
@@ -399,7 +511,7 @@ describe("runPreparedReply media-only handling", () => {
         },
         abortedLastRun: false,
       },
-    } as never;
+    };
 
     const result = await runPreparedReply(
       baseParams({
@@ -427,7 +539,7 @@ describe("runPreparedReply media-only handling", () => {
   });
 
   it("acknowledges pause without starting a new agent run", async () => {
-    const sessionStore = {
+    const sessionStore: Record<string, SessionEntry & { abortedLastRun?: boolean }> = {
       "session-key": {
         sessionId: "session-1",
         updatedAt: 1,
@@ -469,7 +581,7 @@ describe("runPreparedReply media-only handling", () => {
         },
         abortedLastRun: false,
       },
-    } as never;
+    };
 
     const result = await runPreparedReply(
       baseParams({
@@ -504,7 +616,7 @@ describe("runPreparedReply media-only handling", () => {
   it("cancels the current task and records abortedLastRun", async () => {
     vi.mocked(isEmbeddedPiRunActive).mockReturnValue(true);
     vi.mocked(abortEmbeddedPiRun).mockReturnValue(true);
-    const sessionStore = {
+    const sessionStore: Record<string, SessionEntry & { abortedLastRun?: boolean }> = {
       "session-key": {
         sessionId: "session-1",
         updatedAt: 1,
@@ -546,7 +658,7 @@ describe("runPreparedReply media-only handling", () => {
         },
         abortedLastRun: false,
       },
-    } as never;
+    };
 
     const result = await runPreparedReply(
       baseParams({
@@ -582,7 +694,7 @@ describe("runPreparedReply media-only handling", () => {
   });
 
   it("falls back to snapshot-only cancel when no embedded run is active", async () => {
-    const sessionStore = {
+    const sessionStore: Record<string, SessionEntry & { abortedLastRun?: boolean }> = {
       "session-key": {
         sessionId: "session-1",
         updatedAt: 1,
@@ -624,7 +736,7 @@ describe("runPreparedReply media-only handling", () => {
         },
         abortedLastRun: false,
       },
-    } as never;
+    };
 
     const result = await runPreparedReply(
       baseParams({

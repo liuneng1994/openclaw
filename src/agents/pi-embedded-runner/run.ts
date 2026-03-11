@@ -1448,6 +1448,7 @@ export async function runEmbeddedPiAgent(
             toolMetas: attempt.toolMetas,
             lastAssistant: attempt.lastAssistant,
             lastToolError: attempt.lastToolError,
+            pendingApproval: attempt.pendingApproval,
             config: params.config,
             sessionKey: params.sessionKey ?? params.sessionId,
             provider: activeErrorContext.provider,
@@ -1477,6 +1478,7 @@ export async function runEmbeddedPiAgent(
               meta: {
                 durationMs: Date.now() - started,
                 agentMeta,
+                pendingApproval: attempt.pendingApproval,
                 aborted,
                 systemPromptReport: attempt.systemPromptReport,
               },
@@ -1510,6 +1512,7 @@ export async function runEmbeddedPiAgent(
             meta: {
               durationMs: Date.now() - started,
               agentMeta,
+              pendingApproval: attempt.pendingApproval,
               aborted,
               systemPromptReport: attempt.systemPromptReport,
               // Handle client tool calls (OpenResponses hosted tools)

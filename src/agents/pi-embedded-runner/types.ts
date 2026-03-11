@@ -1,6 +1,13 @@
 import type { SessionSystemPromptReport } from "../../config/sessions/types.js";
 import type { MessagingToolSend } from "../pi-embedded-messaging.js";
 
+export type EmbeddedPiPendingApproval = {
+  kind: "git" | "external";
+  summary: string;
+  taskId?: string;
+  runSessionId?: string;
+};
+
 export type EmbeddedPiAgentMeta = {
   sessionId: string;
   provider: string;
@@ -33,6 +40,7 @@ export type EmbeddedPiAgentMeta = {
 export type EmbeddedPiRunMeta = {
   durationMs: number;
   agentMeta?: EmbeddedPiAgentMeta;
+  pendingApproval?: EmbeddedPiPendingApproval;
   aborted?: boolean;
   systemPromptReport?: SessionSystemPromptReport;
   error?: {

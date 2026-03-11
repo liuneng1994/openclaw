@@ -19,6 +19,7 @@ import {
   formatReasoningMessage,
 } from "../../pi-embedded-utils.js";
 import { isLikelyMutatingToolName } from "../../tool-mutation.js";
+import type { EmbeddedPiPendingApproval } from "../types.js";
 
 type ToolMetaEntry = { toolName: string; meta?: string };
 type LastToolError = {
@@ -87,11 +88,22 @@ function resolveToolErrorWarningPolicy(params: {
   };
 }
 
+function buildPendingApprovalPrompt(approval: EmbeddedPiPendingApproval): string {
+  const actionLabel = approval.kind === "git" ? "git 变更动作" : "外部发送/写入动作";
+  return [
+    `检测到需要您确认的${actionLabel}。`,
+    `原因：当前执行策略要求显式确认（requiresConfirmation = true）。`,
+    `待确认动作：${approval.summary}`,
+    "您可以直接回复：确认执行 / 可以执行 / 执行吧 / 先别执行 / 暂停这个",
+  ].join("\n");
+}
+
 export function buildEmbeddedRunPayloads(params: {
   assistantTexts: string[];
   toolMetas: ToolMetaEntry[];
   lastAssistant: AssistantMessage | undefined;
   lastToolError?: LastToolError;
+  pendingApproval?: EmbeddedPiPendingApproval;
   config?: OpenClawConfig;
   sessionKey: string;
   provider?: string;
@@ -281,7 +293,24 @@ export function buildEmbeddedRunPayloads(params: {
     hasUserFacingAssistantReply = true;
   }
 
-  if (params.lastToolError) {
+  if (params.pendingApproval) {
+    const promptText = buildPendingApprovalPrompt(params.pendingApproval);
+    const normalizedPrompt = normalizeTextForComparison(promptText);
+    const duplicatePrompt = normalizedPrompt
+      ? replyItems.some((item) => {
+          if (!item.text) {
+            return false;
+          }
+          const normalizedExisting = normalizeTextForComparison(item.text);
+          return normalizedExisting.length > 0 && normalizedExisting === normalizedPrompt;
+        })
+      : false;
+    if (!duplicatePrompt) {
+      replyItems.push({ text: promptText });
+    }
+  }
+
+  if (params.lastToolError && !params.pendingApproval) {
     const warningPolicy = resolveToolErrorWarningPolicy({
       lastToolError: params.lastToolError,
       hasUserFacingReply: hasUserFacingAssistantReply,
