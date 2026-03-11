@@ -250,3 +250,98 @@
 
 - 让恢复/总结不仅是 prompt rewrite
 - 而是开始进入标准化 `ExecutionCommand / ExecutionEvent` 通路
+
+---
+
+# 后续增量更新：run snapshot、pause/cancel 与 active-run-aware 收口
+
+## 已完成追加
+
+### 1. `继续 / 总结一下` 的 run snapshot 写回
+
+已落地：
+
+- `Task` 快照开始记住最近一次 run session 的：
+  - `run session id`
+  - `run status / phase`
+  - `agent profile`
+- reply flow 在运行开始 / 总结阶段 / 正常结束 / 异常结束时，做最小状态写回
+
+已固定的最小映射：
+
+- 运行开始 → `running`
+- 总结阶段 → `summarizing`
+- 正常结束 → `waiting_user`
+- 异常结束 → `failed`
+
+### 2. `停一下 / 取消` 的最小真实接线
+
+已落地：
+
+- `停一下`
+  - 不强杀底层执行
+  - task 状态写回为 `waiting_user`
+  - latest run snapshot 写回为 `paused`
+- `取消`
+  - 优先复用既有 abort 链路
+  - 尝试调用 `abortEmbeddedPiRun(...)`
+  - 清理 command lane
+  - task / run snapshot 写回为 `cancelled`
+
+### 3. 收紧 pause / cancel / continue 的恢复语义
+
+已落地：
+
+- `继续` 不再误恢复：
+  - `cancelled`
+  - `completed`
+  - `failed`
+    的 latest task
+- 若 latest task 不可恢复，但 `recentTasks` 中仍有最近可恢复任务，则回退恢复那个
+- `取消` 会写 `abortedLastRun = true`
+- `停一下` 不会污染 `abortedLastRun`
+
+### 4. 新增 active-run-aware 最小收口
+
+已落地：
+
+- reply flow 新增最小 `active task run` 判定：
+  - 基于当前会话 `sessionId`
+  - 结合 embedded run 是否 active
+  - 与当前 `latestTask` 做轻量对齐
+- `继续` 命中最近任务、且当前 embedded run 仍 active 时：
+  - 不再重复新开一轮执行
+  - 直接返回确认消息，引导用户用“总结一下”查看现状
+- `取消` 仅在 embedded run 确实 active 时才执行真实 abort；若无 active run，则退化为 snapshot-only cancel
+
+## 当前结果
+
+截至这一版，Route A 在 chat-first 主路径上已形成：
+
+1. task domain / protocol scaffold
+2. task-aware router shim
+3. `继续 / 总结一下` 的 run snapshot 写回
+4. `停一下 / 取消` 的最小接线
+5. `pause / cancel / continue` 的恢复语义收紧
+6. `continue / cancel` 的 active-run-aware 最小执行判断
+
+## 测试结果
+
+当前定向回归结果为：
+
+- `src/task/types.test.ts`
+- `src/task/protocol.test.ts`
+- `src/task/state.test.ts`
+- `src/task/router.test.ts`
+- `src/auto-reply/reply/get-reply-run.media-only.test.ts`
+
+结果：
+
+- `5` 个测试文件
+- `36/36 tests passed`
+
+## 当前判断
+
+这一阶段的主聊天通路已经从“只记住最近任务”推进为：
+
+> 不仅能记住最近任务，也开始能区分“最近任务快照”与“当前是否真有 embedded run 还在跑”，并据此让 `继续 / 取消` 的行为更贴近真实运行态。

@@ -83,7 +83,7 @@ vi.mock("./typing-mode.js", () => ({
   resolveTypingMode: vi.fn().mockReturnValue("off"),
 }));
 
-import { abortEmbeddedPiRun } from "../../agents/pi-embedded.js";
+import { abortEmbeddedPiRun, isEmbeddedPiRunActive } from "../../agents/pi-embedded.js";
 import { updateSessionStore } from "../../config/sessions.js";
 import { clearCommandLane } from "../../process/command-queue.js";
 import { runReplyAgent } from "./agent-runner.js";
@@ -166,6 +166,9 @@ function baseParams(
 describe("runPreparedReply media-only handling", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(abortEmbeddedPiRun).mockReturnValue(false);
+    vi.mocked(isEmbeddedPiRunActive).mockReturnValue(false);
+    vi.mocked(clearCommandLane).mockReturnValue(0);
   });
 
   it("allows media-only prompts and preserves thread context in queued followups", async () => {
@@ -259,6 +262,77 @@ describe("runPreparedReply media-only handling", () => {
     expect(vi.mocked(routeReply)).not.toHaveBeenCalled();
   });
 
+  it("does not start a duplicate run when 继续 targets an already active embedded run", async () => {
+    vi.mocked(isEmbeddedPiRunActive).mockReturnValue(true);
+    const sessionStore = {
+      "session-key": {
+        sessionId: "session-1",
+        updatedAt: 1,
+        taskRouter: {
+          latestTask: {
+            id: "task-1",
+            kind: "modify_code",
+            status: "waiting_user",
+            title: "fix router",
+            conversationId: "session-key",
+            createdAt: 1,
+            updatedAt: 2,
+            latestRunSessionId: "run-1",
+            latestRunSession: {
+              id: "run-1",
+              status: "building",
+              agentProfile: "builder",
+              updatedAt: 2,
+            },
+          },
+          recentTasks: [
+            {
+              id: "task-1",
+              kind: "modify_code",
+              status: "waiting_user",
+              title: "fix router",
+              conversationId: "session-key",
+              createdAt: 1,
+              updatedAt: 2,
+              latestRunSessionId: "run-1",
+              latestRunSession: {
+                id: "run-1",
+                status: "building",
+                agentProfile: "builder",
+                updatedAt: 2,
+              },
+            },
+          ],
+        },
+        abortedLastRun: false,
+      },
+    } as never;
+
+    const result = await runPreparedReply(
+      baseParams({
+        ctx: {
+          Body: "继续",
+          RawBody: "继续",
+          CommandBody: "继续",
+        },
+        sessionCtx: {
+          Body: "继续",
+          BodyStripped: "继续",
+          Provider: "slack",
+        },
+        sessionEntry: sessionStore["session-key"],
+        sessionStore,
+        storePath: "/tmp/session-store.json",
+        isNewSession: false,
+      }),
+    );
+
+    expect(result).toEqual({
+      text: "当前任务仍在推进中，Master：fix router。我不会重复新开一轮执行；若您要我汇报现状，可以直接发“总结一下”。",
+    });
+    expect(vi.mocked(runReplyAgent)).not.toHaveBeenCalled();
+  });
+
   it("acknowledges pause without starting a new agent run", async () => {
     const sessionStore = {
       "session-key": {
@@ -335,6 +409,7 @@ describe("runPreparedReply media-only handling", () => {
   });
 
   it("cancels the current task and records abortedLastRun", async () => {
+    vi.mocked(isEmbeddedPiRunActive).mockReturnValue(true);
     vi.mocked(abortEmbeddedPiRun).mockReturnValue(true);
     const sessionStore = {
       "session-key": {
@@ -411,6 +486,79 @@ describe("runPreparedReply media-only handling", () => {
     );
     expect(sessionStore["session-key"].abortedLastRun).toBe(true);
     expect(vi.mocked(updateSessionStore)).toHaveBeenCalled();
+  });
+
+  it("falls back to snapshot-only cancel when no embedded run is active", async () => {
+    const sessionStore = {
+      "session-key": {
+        sessionId: "session-1",
+        updatedAt: 1,
+        taskRouter: {
+          latestTask: {
+            id: "task-1",
+            kind: "modify_code",
+            status: "running",
+            title: "fix router",
+            conversationId: "session-key",
+            createdAt: 1,
+            updatedAt: 2,
+            latestRunSessionId: "run-1",
+            latestRunSession: {
+              id: "run-1",
+              status: "building",
+              agentProfile: "builder",
+              updatedAt: 2,
+            },
+          },
+          recentTasks: [
+            {
+              id: "task-1",
+              kind: "modify_code",
+              status: "running",
+              title: "fix router",
+              conversationId: "session-key",
+              createdAt: 1,
+              updatedAt: 2,
+              latestRunSessionId: "run-1",
+              latestRunSession: {
+                id: "run-1",
+                status: "building",
+                agentProfile: "builder",
+                updatedAt: 2,
+              },
+            },
+          ],
+        },
+        abortedLastRun: false,
+      },
+    } as never;
+
+    const result = await runPreparedReply(
+      baseParams({
+        ctx: {
+          Body: "取消",
+          RawBody: "取消",
+          CommandBody: "取消",
+        },
+        sessionCtx: {
+          Body: "取消",
+          BodyStripped: "取消",
+          Provider: "slack",
+        },
+        sessionEntry: sessionStore["session-key"],
+        sessionStore,
+        storePath: "/tmp/session-store.json",
+        isNewSession: false,
+      }),
+    );
+
+    expect(result).toEqual({
+      text: "已执行取消，Master。当前任务已标记为取消：fix router；此刻没有发现可中断的活动运行。",
+    });
+    expect(vi.mocked(abortEmbeddedPiRun)).not.toHaveBeenCalled();
+    expect(vi.mocked(clearCommandLane)).not.toHaveBeenCalled();
+    expect(sessionStore["session-key"].taskRouter.latestTask.status).toBe("cancelled");
+    expect(sessionStore["session-key"].abortedLastRun).toBe(false);
   });
 
   it("uses inbound origin channel for run messageProvider", async () => {

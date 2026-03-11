@@ -92,7 +92,7 @@ function resolveResetSessionNoticeRoute(params: {
 }
 
 function buildTaskControlAck(params: {
-  action: "pause" | "cancel";
+  action: "pause" | "cancel" | "continue_active";
   title?: string;
   aborted?: boolean;
 }): string {
@@ -100,10 +100,33 @@ function buildTaskControlAck(params: {
   if (params.action === "pause") {
     return `已先停在这里，Master。任务已标记为暂停待命${titleSuffix}；您稍后发“继续”即可从最近上下文接着推进。`;
   }
+  if (params.action === "continue_active") {
+    return `当前任务仍在推进中，Master${titleSuffix}。我不会重复新开一轮执行；若您要我汇报现状，可以直接发“总结一下”。`;
+  }
   if (params.aborted) {
     return `已执行取消，Master。当前任务已标记为取消，并已尝试中断正在进行的运行${titleSuffix}。`;
   }
   return `已执行取消，Master。当前任务已标记为取消${titleSuffix}；此刻没有发现可中断的活动运行。`;
+}
+
+function resolveActiveTaskRun(params: {
+  sessionEntry?: SessionEntry;
+  sessionId?: string;
+  sessionKey: string;
+}): {
+  latestTask?: NonNullable<SessionEntry["taskRouter"]>["latestTask"];
+  sessionId?: string;
+  laneKey: string;
+  hasActiveRun: boolean;
+} {
+  const latestTask = params.sessionEntry?.taskRouter?.latestTask;
+  const resolvedSessionId = params.sessionEntry?.sessionId ?? params.sessionId;
+  return {
+    latestTask,
+    sessionId: resolvedSessionId,
+    laneKey: resolveEmbeddedSessionLane(params.sessionKey),
+    hasActiveRun: resolvedSessionId ? isEmbeddedPiRunActive(resolvedSessionId) : false,
+  };
 }
 
 async function sendResetSessionNotice(params: {
@@ -468,7 +491,26 @@ export async function runPreparedReply(
   }
 
   const controlAction = taskRouterDecision.controlAction;
-  const latestTask = sessionEntry?.taskRouter?.latestTask;
+  const activeTaskRun = resolveActiveTaskRun({
+    sessionEntry,
+    sessionId,
+    sessionKey,
+  });
+  const latestTask = activeTaskRun.latestTask;
+  if (
+    controlAction?.type === "continue" &&
+    latestTask &&
+    activeTaskRun.hasActiveRun &&
+    taskRouterDecision.matchedExistingTask
+  ) {
+    typing.cleanup();
+    return {
+      text: buildTaskControlAck({
+        action: "continue_active",
+        title: latestTask.title,
+      }),
+    };
+  }
   if (
     sessionEntry &&
     sessionStore &&
@@ -486,12 +528,12 @@ export async function runPreparedReply(
       taskStatus: nextTaskStatus,
     });
 
-    const sessionIdForAbort = sessionEntry.sessionId ?? sessionId;
     let aborted = false;
-    if (taskRouterDecision.taskIntent.kind === "cancel_task" && sessionIdForAbort) {
-      aborted = abortEmbeddedPiRun(sessionIdForAbort);
-      const laneKey = resolveEmbeddedSessionLane(sessionKey);
-      clearCommandLane(laneKey);
+    if (taskRouterDecision.taskIntent.kind === "cancel_task") {
+      if (activeTaskRun.sessionId && activeTaskRun.hasActiveRun) {
+        aborted = abortEmbeddedPiRun(activeTaskRun.sessionId);
+        clearCommandLane(activeTaskRun.laneKey);
+      }
       if (nextSessionEntry) {
         nextSessionEntry = {
           ...nextSessionEntry,
