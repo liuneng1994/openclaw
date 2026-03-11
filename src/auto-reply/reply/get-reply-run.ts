@@ -439,6 +439,11 @@ export async function runPreparedReply(
     decision: taskRouterDecision,
     originalPrompt: taskRouterDecision.rewrittenText,
   });
+  if (executionKernelPlan.policy) {
+    extraSystemPromptParts.push(
+      `[Execution Policy Snapshot]\nMode: ${executionKernelPlan.policy.mode}\nRisk: ${executionKernelPlan.policy.risk}\nWrite Intent: ${executionKernelPlan.policy.writeIntent}\nRequires Confirmation: ${executionKernelPlan.policy.requiresConfirmation}`,
+    );
+  }
   prefixedCommandBody = executionKernelPlan.promptText ?? taskRouterDecision.rewrittenText;
   execOverrides = {
     ...execOverrides,
@@ -690,6 +695,7 @@ export async function runPreparedReply(
       ownerNumbers: command.ownerList.length > 0 ? command.ownerList : undefined,
       inputProvenance: ctx.InputProvenance ?? sessionCtx.InputProvenance,
       extraSystemPrompt: extraSystemPromptParts.join("\n\n") || undefined,
+      executionPolicy: executionKernelPlan.policy,
       ...(isReasoningTagProvider(provider) ? { enforceFinalTag: true } : {}),
     },
   };

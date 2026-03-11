@@ -121,6 +121,36 @@ describe("agent-runner-utils", () => {
     });
   });
 
+  it("appends execution policy guard into extraSystemPrompt for runtime entry", () => {
+    const run = makeRun({
+      extraSystemPrompt: "Base guard",
+      executionPolicy: {
+        mode: "readonly",
+        risk: "low",
+        writeIntent: "none",
+        requiresConfirmation: false,
+      },
+    });
+    const authProfile = resolveProviderScopedAuthProfile({
+      provider: "openai",
+      primaryProvider: "openai",
+      authProfileId: "profile-openai",
+      authProfileIdSource: "user",
+    });
+
+    const resolved = buildEmbeddedRunBaseParams({
+      run,
+      provider: "openai",
+      model: "gpt-4.1-mini",
+      runId: "run-2",
+      authProfile,
+    });
+
+    expect(resolved.extraSystemPrompt).toContain("Base guard");
+    expect(resolved.extraSystemPrompt).toContain("[Execution Policy Guard]");
+    expect(resolved.extraSystemPrompt).toContain("Mode: readonly");
+  });
+
   it("builds embedded contexts and scopes auth profile by provider", () => {
     const run = makeRun({
       authProfileId: "profile-openai",

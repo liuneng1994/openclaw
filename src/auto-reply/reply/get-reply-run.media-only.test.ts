@@ -256,6 +256,12 @@ describe("runPreparedReply media-only handling", () => {
       ask: "always",
       security: "allowlist",
     });
+    expect(call?.followupRun.run.executionPolicy).toMatchObject({
+      mode: "readonly",
+      risk: "low",
+      writeIntent: "none",
+    });
+    expect(call?.followupRun.run.extraSystemPrompt ?? "").toContain("[Execution Policy Snapshot]");
   });
 
   it("allows media-only prompts and preserves thread context in queued followups", async () => {

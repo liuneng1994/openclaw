@@ -4,6 +4,7 @@ import { getChannelDock } from "../../channels/dock.js";
 import type { ChannelId, ChannelThreadingToolContext } from "../../channels/plugins/types.js";
 import { normalizeAnyChannelId, normalizeChannelId } from "../../channels/registry.js";
 import type { OpenClawConfig } from "../../config/config.js";
+import { buildExecutionPolicySystemPrompt } from "../../task/kernel.js";
 import { isReasoningTagProvider } from "../../utils/provider-utils.js";
 import { estimateUsageCost, formatTokenCount, formatUsd } from "../../utils/usage-format.js";
 import type { TemplateContext } from "../templating.js";
@@ -176,6 +177,12 @@ export function buildEmbeddedRunBaseParams(params: {
   authProfile: ReturnType<typeof resolveProviderScopedAuthProfile>;
   allowTransientCooldownProbe?: boolean;
 }) {
+  const policyPrompt = params.run.executionPolicy
+    ? buildExecutionPolicySystemPrompt(params.run.executionPolicy)
+    : undefined;
+  const extraSystemPrompt = [params.run.extraSystemPrompt, policyPrompt]
+    .filter((value): value is string => Boolean(value && value.trim()))
+    .join("\n\n");
   return {
     sessionFile: params.run.sessionFile,
     workspaceDir: params.run.workspaceDir,
@@ -195,6 +202,7 @@ export function buildEmbeddedRunBaseParams(params: {
     execOverrides: params.run.execOverrides,
     bashElevated: params.run.bashElevated,
     timeoutMs: params.run.timeoutMs,
+    extraSystemPrompt: extraSystemPrompt || undefined,
     runId: params.runId,
     allowTransientCooldownProbe: params.allowTransientCooldownProbe,
   };

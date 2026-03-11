@@ -132,6 +132,22 @@ function resolvePolicyExecOverrides(
   };
 }
 
+export function buildExecutionPolicySystemPrompt(policy: ExecutionPolicy): string {
+  return [
+    "[Execution Policy Guard]",
+    `Mode: ${policy.mode}`,
+    `Risk: ${policy.risk}`,
+    `Write Intent: ${policy.writeIntent}`,
+    `Requires Confirmation: ${policy.requiresConfirmation}`,
+    "Policy Enforcement:",
+    policy.mode === "readonly"
+      ? "- Do not write files, mutate git state, send external messages, or run mutating shell commands. Restrict work to reading, inspection, explanation, and planning unless the user explicitly changes policy."
+      : policy.mode === "ask"
+        ? "- You may inspect and prepare changes, but before git mutations, external side effects, or risky writes, stop and ask for explicit confirmation."
+        : "- Routine workspace edits and tests may proceed automatically within the workspace, but git mutations or external side effects still require confirmation when the policy says so.",
+  ].join("\n");
+}
+
 function buildExecutionKernelPrompt(params: {
   command: ExecutionCommand;
   events: ExecutionEvent[];
