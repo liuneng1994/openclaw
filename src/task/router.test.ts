@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { SessionEntry } from "../config/sessions.js";
-import { applyTaskRouterSnapshot, resolveTaskRouterDecision } from "./router.js";
+import {
+  applyTaskRouterSnapshot,
+  resolveTaskRouterDecision,
+  updateTaskRouterRunProgress,
+} from "./router.js";
 
 describe("task/router", () => {
   it("tracks a new execution task in the session snapshot", () => {
@@ -13,6 +17,10 @@ describe("task/router", () => {
       kind: "research_repo",
       status: "running",
       conversationId: "telegram:1",
+    });
+    expect(decision.snapshot.latestTask?.latestRunSession).toMatchObject({
+      status: "researching",
+      agentProfile: "researcher",
     });
     expect(decision.snapshot.recentTasks).toHaveLength(1);
     expect(decision.matchedExistingTask).toBe(false);
@@ -31,6 +39,13 @@ describe("task/router", () => {
           conversationId: "telegram:1",
           createdAt: 1,
           updatedAt: 2,
+          latestRunSessionId: "run-1",
+          latestRunSession: {
+            id: "run-1",
+            status: "building",
+            agentProfile: "builder",
+            updatedAt: 2,
+          },
         },
         recentTasks: [
           {
@@ -41,6 +56,13 @@ describe("task/router", () => {
             conversationId: "telegram:1",
             createdAt: 1,
             updatedAt: 2,
+            latestRunSessionId: "run-1",
+            latestRunSession: {
+              id: "run-1",
+              status: "building",
+              agentProfile: "builder",
+              updatedAt: 2,
+            },
           },
         ],
       },
@@ -55,6 +77,7 @@ describe("task/router", () => {
     expect(decision.matchedExistingTask).toBe(true);
     expect(decision.rewrittenText).toContain("[Task Router]");
     expect(decision.rewrittenText).toContain("fix router");
+    expect(decision.rewrittenText).toContain("Run Session Status");
     expect(decision.snapshot.latestTask?.status).toBe("running");
     expect(decision.snapshot.recentTasks?.[0]?.status).toBe("running");
   });
@@ -150,5 +173,58 @@ describe("task/router", () => {
 
     expect(next.taskRouter?.latestTask?.id).toBe("task-1");
     expect(next.taskRouter?.recentTasks?.[0]?.id).toBe("task-1");
+  });
+
+  it("updates run progress for the tracked latest task", () => {
+    const next = updateTaskRouterRunProgress({
+      entry: {
+        sessionId: "session-1",
+        updatedAt: 1,
+        taskRouter: {
+          latestTask: {
+            id: "task-1",
+            kind: "modify_code",
+            status: "running",
+            title: "fix router",
+            conversationId: "telegram:1",
+            createdAt: 1,
+            updatedAt: 2,
+            latestRunSessionId: "run-1",
+            latestRunSession: {
+              id: "run-1",
+              status: "building",
+              agentProfile: "builder",
+              updatedAt: 2,
+            },
+          },
+          recentTasks: [
+            {
+              id: "task-1",
+              kind: "modify_code",
+              status: "running",
+              title: "fix router",
+              conversationId: "telegram:1",
+              createdAt: 1,
+              updatedAt: 2,
+              latestRunSessionId: "run-1",
+              latestRunSession: {
+                id: "run-1",
+                status: "building",
+                agentProfile: "builder",
+                updatedAt: 2,
+              },
+            },
+          ],
+        },
+      },
+      taskId: "task-1",
+      runSessionId: "run-1",
+      runStatus: "completed",
+      taskStatus: "waiting_user",
+    });
+
+    expect(next?.taskRouter?.latestTask?.status).toBe("waiting_user");
+    expect(next?.taskRouter?.latestTask?.latestRunSession?.status).toBe("completed");
+    expect(next?.taskRouter?.recentTasks?.[0]?.latestRunSession?.status).toBe("completed");
   });
 });

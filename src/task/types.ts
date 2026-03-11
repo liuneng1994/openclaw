@@ -57,6 +57,13 @@ export type ConversationRef = {
   threadId?: string;
 };
 
+export type TaskRunSnapshot = {
+  id: string;
+  status: RunSessionStatus;
+  agentProfile: AgentProfileId;
+  updatedAt: number;
+};
+
 export type TaskRecord = {
   id: string;
   kind: TaskKind;
@@ -66,6 +73,7 @@ export type TaskRecord = {
   createdAt: number;
   updatedAt: number;
   latestRunSessionId?: string;
+  latestRunSession?: TaskRunSnapshot;
 };
 
 export type RunSessionRecord = {
@@ -162,6 +170,46 @@ export function deriveTaskTitle(input: { kind: TaskKind; text: string }): string
     return input.kind;
   }
   return text.length <= 80 ? text : `${text.slice(0, 77)}...`;
+}
+
+export function resolveAgentProfileForTaskKind(kind: TaskKind): AgentProfileId {
+  switch (kind) {
+    case "research_repo":
+      return "researcher";
+    case "modify_code":
+      return "builder";
+    case "run_tests":
+      return "builder";
+    case "review_diff":
+      return "reviewer";
+    case "resume_task":
+      return "planner";
+    case "cancel_task":
+      return "utility";
+    case "ask":
+    default:
+      return "planner";
+  }
+}
+
+export function resolveRunSessionStatusForTaskKind(kind: TaskKind): RunSessionStatus {
+  switch (kind) {
+    case "research_repo":
+      return "researching";
+    case "modify_code":
+      return "building";
+    case "run_tests":
+      return "testing";
+    case "review_diff":
+      return "reviewing";
+    case "resume_task":
+      return "planning";
+    case "cancel_task":
+      return "cancelled";
+    case "ask":
+    default:
+      return "planning";
+  }
 }
 
 export function createRootRunSession(params: {

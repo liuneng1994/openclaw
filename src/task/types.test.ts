@@ -5,6 +5,8 @@ import {
   deriveTaskTitle,
   isActiveTaskStatus,
   isResumableTaskStatus,
+  resolveAgentProfileForTaskKind,
+  resolveRunSessionStatusForTaskKind,
 } from "./types.js";
 
 describe("task/types", () => {
@@ -44,6 +46,13 @@ describe("task/types", () => {
       createdAt: 123,
       updatedAt: 123,
     });
+  });
+
+  it("maps task kinds to agent profiles and run phases", () => {
+    expect(resolveAgentProfileForTaskKind("research_repo")).toBe("researcher");
+    expect(resolveAgentProfileForTaskKind("modify_code")).toBe("builder");
+    expect(resolveRunSessionStatusForTaskKind("run_tests")).toBe("testing");
+    expect(resolveRunSessionStatusForTaskKind("review_diff")).toBe("reviewing");
   });
 
   it("ships the expected built-in agent profiles", () => {

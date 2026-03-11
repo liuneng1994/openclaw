@@ -231,6 +231,13 @@ export function createExecutionEvent(input: {
   };
 }
 
+export const TaskRunSnapshotSchema = Type.Object({
+  id: Type.String({ minLength: 1 }),
+  status: stringEnum(RUN_SESSION_STATUSES),
+  agentProfile: stringEnum(AGENT_PROFILE_IDS),
+  updatedAt: Type.Number(),
+});
+
 export const TaskRecordSchema = Type.Object({
   id: Type.String({ minLength: 1 }),
   kind: stringEnum(TASK_KINDS),
@@ -240,4 +247,5 @@ export const TaskRecordSchema = Type.Object({
   createdAt: Type.Number(),
   updatedAt: Type.Number(),
   latestRunSessionId: Type.Optional(Type.String()),
+  latestRunSession: Type.Optional(TaskRunSnapshotSchema),
 });

@@ -193,6 +193,24 @@ export type SessionEntry = {
       createdAt: number;
       updatedAt: number;
       latestRunSessionId?: string;
+      latestRunSession?: {
+        id: string;
+        status:
+          | "created"
+          | "planning"
+          | "researching"
+          | "building"
+          | "testing"
+          | "reviewing"
+          | "summarizing"
+          | "paused"
+          | "blocked"
+          | "completed"
+          | "failed"
+          | "cancelled";
+        agentProfile: "planner" | "researcher" | "builder" | "reviewer" | "summarizer" | "utility";
+        updatedAt: number;
+      };
     };
     recentTasks?: Array<{
       id: string;
@@ -218,6 +236,24 @@ export type SessionEntry = {
       createdAt: number;
       updatedAt: number;
       latestRunSessionId?: string;
+      latestRunSession?: {
+        id: string;
+        status:
+          | "created"
+          | "planning"
+          | "researching"
+          | "building"
+          | "testing"
+          | "reviewing"
+          | "summarizing"
+          | "paused"
+          | "blocked"
+          | "completed"
+          | "failed"
+          | "cancelled";
+        agentProfile: "planner" | "researcher" | "builder" | "reviewer" | "summarizer" | "utility";
+        updatedAt: number;
+      };
     }>;
   };
 };

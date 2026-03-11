@@ -6,7 +6,12 @@ import {
   type ControlAction,
   type TaskIntent,
 } from "./protocol.js";
-import { deriveTaskTitle, type TaskRecord } from "./types.js";
+import {
+  deriveTaskTitle,
+  resolveAgentProfileForTaskKind,
+  resolveRunSessionStatusForTaskKind,
+  type TaskRecord,
+} from "./types.js";
 
 const MAX_RECENT_TASKS = 5;
 
@@ -28,8 +33,23 @@ function createTaskId(conversationId: string, text: string): string {
   return `task:${conversationId}:${normalized}`;
 }
 
+function createRunSessionId(taskId: string): string {
+  return `run:${taskId}:${Date.now()}`;
+}
+
 function cloneTask(task: TaskRecord): TaskRecord {
   return { ...task };
+}
+
+function buildRunSnapshotLines(task: TaskRecord): string[] {
+  if (!task.latestRunSession) {
+    return [];
+  }
+  return [
+    `Run Session ID: ${task.latestRunSession.id}`,
+    `Run Session Status: ${task.latestRunSession.status}`,
+    `Run Agent Profile: ${task.latestRunSession.agentProfile}`,
+  ];
 }
 
 function buildResumePrompt(task: TaskRecord): string {
@@ -40,6 +60,7 @@ function buildResumePrompt(task: TaskRecord): string {
     `Task Title: ${task.title}`,
     `Task Kind: ${task.kind}`,
     `Task Status: ${task.status}`,
+    ...buildRunSnapshotLines(task),
     "Instruction: Resume this task from the latest known context instead of treating the message as a brand-new request.",
     "Original user message: 继续",
   ].join("\n");
@@ -53,6 +74,7 @@ function buildSummaryPrompt(task: TaskRecord): string {
     `Task Title: ${task.title}`,
     `Task Kind: ${task.kind}`,
     `Task Status: ${task.status}`,
+    ...buildRunSnapshotLines(task),
     "Instruction: Summarize the current task state, progress, blockers, and recommended next step.",
     "Original user message: 总结一下",
   ].join("\n");
@@ -150,31 +172,37 @@ export function resolveTaskRouterDecision(input: {
       status: "waiting_user",
       updatedAt: Date.now(),
     };
-    recentTasks = updateExistingTaskStatus(recentTasks, latestTask.id, () => latestTask);
+    recentTasks = updateExistingTaskStatus(recentTasks, latestTask.id, () => latestTask!);
   } else if (taskIntent.kind === "cancel_task" && latestTask) {
     latestTask = {
       ...latestTask,
       status: "cancelled",
       updatedAt: Date.now(),
     };
-    recentTasks = updateExistingTaskStatus(recentTasks, latestTask.id, () => latestTask);
+    recentTasks = updateExistingTaskStatus(recentTasks, latestTask.id, () => latestTask!);
   } else if (
     taskIntent.requiresExecution &&
     taskIntent.kind !== "resume_task" &&
     taskIntent.kind !== "cancel_task"
   ) {
+    const taskId = createTaskId(input.conversationId, input.text);
+    const runSessionId = createRunSessionId(taskId);
+    const now = Date.now();
     const nextTask: TaskRecord = {
-      id: createTaskId(input.conversationId, input.text),
+      id: taskId,
       kind: taskIntent.kind,
       status: "running",
       title: deriveTaskTitle({ kind: taskIntent.kind, text: input.text }),
       conversationId: input.conversationId,
-      createdAt:
-        latestTask?.id === createTaskId(input.conversationId, input.text)
-          ? (latestTask.createdAt ?? Date.now())
-          : Date.now(),
-      updatedAt: Date.now(),
-      latestRunSessionId: undefined,
+      createdAt: latestTask?.id === taskId ? (latestTask.createdAt ?? now) : now,
+      updatedAt: now,
+      latestRunSessionId: runSessionId,
+      latestRunSession: {
+        id: runSessionId,
+        status: resolveRunSessionStatusForTaskKind(taskIntent.kind),
+        agentProfile: resolveAgentProfileForTaskKind(taskIntent.kind),
+        updatedAt: now,
+      },
     };
     latestTask = nextTask;
     recentTasks = upsertRecentTasks(recentTasks, nextTask);
@@ -197,4 +225,61 @@ export function applyTaskRouterSnapshot(input: {
   snapshot: TaskRouterSnapshot;
 }): SessionEntry {
   return withTaskRouterSnapshot(input.entry, input.snapshot);
+}
+
+export function updateTaskRouterRunProgress(input: {
+  entry: SessionEntry | undefined;
+  taskId?: string;
+  runSessionId?: string;
+  runStatus:
+    | "created"
+    | "planning"
+    | "researching"
+    | "building"
+    | "testing"
+    | "reviewing"
+    | "summarizing"
+    | "paused"
+    | "blocked"
+    | "completed"
+    | "failed"
+    | "cancelled";
+  taskStatus?:
+    | "new"
+    | "planned"
+    | "running"
+    | "blocked"
+    | "waiting_user"
+    | "completed"
+    | "failed"
+    | "cancelled";
+}): SessionEntry | undefined {
+  if (!input.entry?.taskRouter || !input.taskId) {
+    return input.entry;
+  }
+
+  const snapshot = normalizeSnapshot(input.entry.taskRouter);
+  const now = Date.now();
+  const updateTask = (task: TaskRecord): TaskRecord => {
+    if (task.id !== input.taskId) {
+      return task;
+    }
+    return {
+      ...task,
+      status: input.taskStatus ?? task.status,
+      updatedAt: now,
+      latestRunSessionId: input.runSessionId ?? task.latestRunSessionId,
+      latestRunSession: {
+        id: input.runSessionId ?? task.latestRunSession?.id ?? task.latestRunSessionId ?? task.id,
+        status: input.runStatus,
+        agentProfile:
+          task.latestRunSession?.agentProfile ?? resolveAgentProfileForTaskKind(task.kind),
+        updatedAt: now,
+      },
+    };
+  };
+
+  const latestTask = snapshot.latestTask ? updateTask(snapshot.latestTask) : undefined;
+  const recentTasks = snapshot.recentTasks?.map(updateTask) ?? [];
+  return withTaskRouterSnapshot(input.entry, { latestTask, recentTasks });
 }

@@ -20,6 +20,7 @@ import { emitDiagnosticEvent, isDiagnosticsEnabled } from "../../infra/diagnosti
 import { generateSecureUuid } from "../../infra/secure-random.js";
 import { enqueueSystemEvent } from "../../infra/system-events.js";
 import { defaultRuntime } from "../../runtime.js";
+import { updateTaskRouterRunProgress } from "../../task/router.js";
 import { estimateUsageCost, resolveModelCostConfig } from "../../utils/usage-format.js";
 import {
   buildFallbackClearedNotice,
@@ -59,6 +60,10 @@ import { createTypingSignaler } from "./typing-mode.js";
 import type { TypingController } from "./typing.js";
 
 const BLOCK_REPLY_SEND_TIMEOUT_MS = 15_000;
+
+function inferTaskRunStatusFromCommandBody(commandBody: string): "planning" | "summarizing" {
+  return commandBody.includes("Original user message: 总结一下") ? "summarizing" : "planning";
+}
 
 export async function runReplyAgent(params: {
   commandBody: string;
@@ -224,6 +229,9 @@ export async function runReplyAgent(params: {
 
   await typingSignals.signalRunStart();
 
+  const latestTaskId = activeSessionEntry?.taskRouter?.latestTask?.id;
+  const latestRunSessionId = activeSessionEntry?.taskRouter?.latestTask?.latestRunSessionId;
+
   activeSessionEntry = await runMemoryFlushIfNeeded({
     cfg,
     followupRun,
@@ -250,6 +258,65 @@ export async function runReplyAgent(params: {
     storePath,
     defaultModel,
     agentCfgContextTokens,
+  });
+
+  const persistTaskRunProgress = async (params: {
+    runStatus:
+      | "created"
+      | "planning"
+      | "researching"
+      | "building"
+      | "testing"
+      | "reviewing"
+      | "summarizing"
+      | "paused"
+      | "blocked"
+      | "completed"
+      | "failed"
+      | "cancelled";
+    taskStatus?:
+      | "new"
+      | "planned"
+      | "running"
+      | "blocked"
+      | "waiting_user"
+      | "completed"
+      | "failed"
+      | "cancelled";
+  }) => {
+    if (!latestTaskId || !activeSessionStore || !sessionKey) {
+      return;
+    }
+    const nextEntry = updateTaskRouterRunProgress({
+      entry: activeSessionEntry,
+      taskId: latestTaskId,
+      runSessionId: latestRunSessionId,
+      runStatus: params.runStatus,
+      taskStatus: params.taskStatus,
+    });
+    if (nextEntry) {
+      activeSessionEntry = nextEntry;
+      activeSessionStore[sessionKey] = nextEntry;
+    }
+    if (storePath) {
+      await updateSessionStoreEntry({
+        storePath,
+        sessionKey,
+        update: async (entry) =>
+          updateTaskRouterRunProgress({
+            entry,
+            taskId: latestTaskId,
+            runSessionId: latestRunSessionId,
+            runStatus: params.runStatus,
+            taskStatus: params.taskStatus,
+          }) ?? {},
+      });
+    }
+  };
+
+  await persistTaskRunProgress({
+    runStatus: inferTaskRunStatusFromCommandBody(commandBody),
+    taskStatus: "running",
   });
 
   let responseUsageLine: string | undefined;
@@ -482,6 +549,10 @@ export async function runReplyAgent(params: {
     // Otherwise, a late typing trigger (e.g. from a tool callback) can outlive the run and
     // keep the typing indicator stuck.
     if (payloadArray.length === 0) {
+      await persistTaskRunProgress({
+        runStatus: "completed",
+        taskStatus: "waiting_user",
+      });
       return finalizeWithFollowup(undefined, queueKey, runFollowupTurn);
     }
 
@@ -511,6 +582,10 @@ export async function runReplyAgent(params: {
     didLogHeartbeatStrip = payloadResult.didLogHeartbeatStrip;
 
     if (replyPayloads.length === 0) {
+      await persistTaskRunProgress({
+        runStatus: "completed",
+        taskStatus: "waiting_user",
+      });
       return finalizeWithFollowup(undefined, queueKey, runFollowupTurn);
     }
 
@@ -700,12 +775,21 @@ export async function runReplyAgent(params: {
       finalPayloads = appendUsageLine(finalPayloads, responseUsageLine);
     }
 
+    await persistTaskRunProgress({
+      runStatus: "completed",
+      taskStatus: "waiting_user",
+    });
+
     return finalizeWithFollowup(
       finalPayloads.length === 1 ? finalPayloads[0] : finalPayloads,
       queueKey,
       runFollowupTurn,
     );
   } catch (error) {
+    await persistTaskRunProgress({
+      runStatus: "failed",
+      taskStatus: "failed",
+    });
     // Keep the followup queue moving even when an unexpected exception escapes
     // the run path; the caller still receives the original error.
     finalizeWithFollowup(undefined, queueKey, runFollowupTurn);
