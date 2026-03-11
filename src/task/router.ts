@@ -8,8 +8,11 @@ import {
 } from "./protocol.js";
 import { deriveTaskTitle, type TaskRecord } from "./types.js";
 
+const MAX_RECENT_TASKS = 5;
+
 type TaskRouterSnapshot = {
   latestTask?: TaskRecord;
+  recentTasks?: TaskRecord[];
 };
 
 export type TaskRouterDecision = {
@@ -23,6 +26,10 @@ export type TaskRouterDecision = {
 function createTaskId(conversationId: string, text: string): string {
   const normalized = text.trim().toLowerCase().replace(/\s+/g, "-").slice(0, 32) || "task";
   return `task:${conversationId}:${normalized}`;
+}
+
+function cloneTask(task: TaskRecord): TaskRecord {
+  return { ...task };
 }
 
 function buildResumePrompt(task: TaskRecord): string {
@@ -51,6 +58,44 @@ function buildSummaryPrompt(task: TaskRecord): string {
   ].join("\n");
 }
 
+function buildTaskListPrompt(tasks: TaskRecord[]): string {
+  const lines = tasks.map(
+    (task, index) =>
+      `${index + 1}. [${task.status}] ${task.title} (id=${task.id}, kind=${task.kind})`,
+  );
+  return [
+    "[Task Router]",
+    "The user asked to list the recent tracked tasks in this conversation.",
+    "Instruction: Explain the current tracked tasks in concise Chinese, identify the latest active task, and suggest what to continue next.",
+    "Tracked tasks:",
+    ...lines,
+    "Original user message: 任务列表",
+  ].join("\n");
+}
+
+function upsertRecentTasks(tasks: TaskRecord[], nextTask: TaskRecord): TaskRecord[] {
+  const deduped = tasks.filter((task) => task.id !== nextTask.id);
+  return [cloneTask(nextTask), ...deduped].slice(0, MAX_RECENT_TASKS);
+}
+
+function updateExistingTaskStatus(
+  tasks: TaskRecord[],
+  taskId: string | undefined,
+  mutate: (task: TaskRecord) => TaskRecord,
+): TaskRecord[] {
+  if (!taskId) {
+    return tasks;
+  }
+  return tasks.map((task) => (task.id === taskId ? mutate(task) : task));
+}
+
+function normalizeSnapshot(snapshot: TaskRouterSnapshot | undefined): TaskRouterSnapshot {
+  return {
+    latestTask: snapshot?.latestTask ? cloneTask(snapshot.latestTask) : undefined,
+    recentTasks: snapshot?.recentTasks?.map(cloneTask) ?? [],
+  };
+}
+
 function withTaskRouterSnapshot(
   entry: SessionEntry | undefined,
   snapshot: TaskRouterSnapshot,
@@ -73,56 +118,66 @@ export function resolveTaskRouterDecision(input: {
     text: input.text,
     conversationId: input.conversationId,
   });
-  const existingTask = input.sessionEntry?.taskRouter?.latestTask;
-  let latestTask = existingTask;
+  const snapshot = normalizeSnapshot(input.sessionEntry?.taskRouter);
+  let latestTask = snapshot.latestTask;
+  let recentTasks = snapshot.recentTasks ?? [];
   let rewrittenText = input.text;
   let matchedExistingTask = false;
 
-  if (controlAction?.type === "continue" && existingTask) {
+  if (controlAction?.type === "continue" && latestTask) {
     latestTask = {
-      ...existingTask,
+      ...latestTask,
       status: "running",
       updatedAt: Date.now(),
     };
+    recentTasks = upsertRecentTasks(recentTasks, latestTask);
     rewrittenText = buildResumePrompt(latestTask);
     matchedExistingTask = true;
-  } else if (controlAction?.type === "request_summary" && existingTask) {
+  } else if (controlAction?.type === "request_summary" && latestTask) {
     latestTask = {
-      ...existingTask,
+      ...latestTask,
       updatedAt: Date.now(),
     };
+    recentTasks = upsertRecentTasks(recentTasks, latestTask);
     rewrittenText = buildSummaryPrompt(latestTask);
     matchedExistingTask = true;
-  } else if (controlAction?.type === "pause" && existingTask) {
+  } else if (controlAction?.type === "list_tasks") {
+    rewrittenText = buildTaskListPrompt(recentTasks);
+    matchedExistingTask = recentTasks.length > 0;
+  } else if (controlAction?.type === "pause" && latestTask) {
     latestTask = {
-      ...existingTask,
+      ...latestTask,
       status: "waiting_user",
       updatedAt: Date.now(),
     };
-  } else if (taskIntent.kind === "cancel_task" && existingTask) {
+    recentTasks = updateExistingTaskStatus(recentTasks, latestTask.id, () => latestTask);
+  } else if (taskIntent.kind === "cancel_task" && latestTask) {
     latestTask = {
-      ...existingTask,
+      ...latestTask,
       status: "cancelled",
       updatedAt: Date.now(),
     };
+    recentTasks = updateExistingTaskStatus(recentTasks, latestTask.id, () => latestTask);
   } else if (
     taskIntent.requiresExecution &&
     taskIntent.kind !== "resume_task" &&
     taskIntent.kind !== "cancel_task"
   ) {
-    latestTask = {
+    const nextTask: TaskRecord = {
       id: createTaskId(input.conversationId, input.text),
       kind: taskIntent.kind,
       status: "running",
       title: deriveTaskTitle({ kind: taskIntent.kind, text: input.text }),
       conversationId: input.conversationId,
       createdAt:
-        existingTask?.id === createTaskId(input.conversationId, input.text)
-          ? (existingTask.createdAt ?? Date.now())
+        latestTask?.id === createTaskId(input.conversationId, input.text)
+          ? (latestTask.createdAt ?? Date.now())
           : Date.now(),
       updatedAt: Date.now(),
       latestRunSessionId: undefined,
     };
+    latestTask = nextTask;
+    recentTasks = upsertRecentTasks(recentTasks, nextTask);
   }
 
   return {
@@ -131,6 +186,7 @@ export function resolveTaskRouterDecision(input: {
     rewrittenText,
     snapshot: {
       latestTask,
+      recentTasks,
     },
     matchedExistingTask,
   };

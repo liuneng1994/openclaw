@@ -19,6 +19,7 @@ export const CONTROL_ACTIONS = [
   "downgrade_to_readonly",
   "inject_feedback",
   "request_summary",
+  "list_tasks",
 ] as const;
 
 export type ControlActionType = (typeof CONTROL_ACTIONS)[number];
@@ -111,6 +112,7 @@ export type ExecutionEvent = Static<typeof ExecutionEventSchema>;
 const RESUME_PREFIXES = [/^继续[\s，,。.!！?？]*$/u, /^continue(?:\b|\s|$)/iu];
 const PAUSE_PREFIXES = [/^停一下/u, /^暂停/u, /^pause(?:\b|\s|$)/iu];
 const SUMMARY_PREFIXES = [/^总结一下/u, /^总结/u, /^summary(?:\b|\s|$)/iu];
+const TASK_LIST_PREFIXES = [/^任务列表/u, /^列出任务/u, /^list tasks?(?:\b|\s|$)/iu];
 const CANCEL_PREFIXES = [/^取消/u, /^停止任务/u, /^cancel(?:\b|\s|$)/iu];
 
 export function inferTaskIntent(input: {
@@ -175,6 +177,9 @@ export function inferControlAction(input: {
   }
   if (SUMMARY_PREFIXES.some((re) => re.test(text))) {
     return { type: "request_summary", ...base };
+  }
+  if (TASK_LIST_PREFIXES.some((re) => re.test(text))) {
+    return { type: "list_tasks", ...base };
   }
   if (text.startsWith("只分析") || /^readonly(?:\b|\s|$)/iu.test(text)) {
     return { type: "downgrade_to_readonly", ...base };

@@ -157,24 +157,96 @@
 
 本轮仍是**最小可用版**，尚未做到：
 
-- conversation 级多 task 列表
 - 真实 `TaskRecord` 持久化集合
-- `继续第 N 个任务`、`列出任务`、`停止当前任务` 等 richer control plane 语义
-- `ExecutionCommand / ExecutionEvent` 的完整 kernel 接线
+- `继续第 N 个任务` 这类按编号/按 id 精确恢复
+- 与 `ExecutionCommand / ExecutionEvent` 的完整 kernel 接线
+
+---
+
+# 第三刀更新：最小任务集合与任务列表闭环
+
+## 本轮新增
+
+### 1. 从 `latestTask` 扩展到 `recentTasks`
+
+已落地能力：
+
+- `taskRouter` 现在不仅维护 `latestTask`
+- 还维护一个上限为 `5` 的 `recentTasks` 列表
+- 新执行型请求会被插入到任务列表头部
+- 已存在 task 会在更新状态时原位刷新并去重
+
+这意味着：
+
+- 不再只有“最近一个任务”的单点记忆
+- 已具备最小 conversation 级任务索引能力
+
+### 2. 新增“任务列表 / 列出任务”控制语义
+
+已落地能力：
+
+- 新增控制动作：`list_tasks`
+- 识别：
+  - `任务列表`
+  - `列出任务`
+  - `list tasks`
+- 命中后会将消息改写为内部任务列表提示，要求 agent：
+  - 用简明中文解释当前追踪任务
+  - 指出最新活跃任务
+  - 建议下一步继续什么
+
+### 3. 基本功能闭环已形成
+
+当前已具备的闭环：
+
+1. 用户发起一个执行型请求（如“研究这个 repo 的 session 架构”）
+2. 系统在 session store 中记录 `latestTask + recentTasks`
+3. 用户再发：
+   - `继续`
+   - `总结一下`
+   - `任务列表`
+4. task router 先处理控制语义
+5. 若命中任务，则改写为恢复/总结/列任务的内部提示
+6. 再回到现有 `runReplyAgent(...)` 主路径执行
+
+这已经形成：
+
+> 用户控制语义 -> task router -> session task snapshot -> 现有 agent runtime
+
+## 测试结果
+
+当前 task 模块测试结果：
+
+- `4` 个测试文件
+- `15/15 tests passed`
+
+新增覆盖：
+
+- 任务列表构造
+- `recentTasks` 持久化
+- `继续` 时同步刷新 `recentTasks`
+
+## 当前限制
+
+当前闭环仍是**最小可用**，未完成部分包括：
+
+- 真实任务表持久化（而非 session 内快照）
+- 编号级任务控制（例如“继续第 2 个任务”）
+- `ExecutionCommand / ExecutionEvent` 的真实 kernel 落地
+- 任务完成/失败状态与真实执行结果的自动绑定
 
 ## 下一步建议
 
-### 下一刀：把 `latestTask` 升级为最小任务集合
+### 下一刀：真实任务记录层
 
 优先目标：
 
-- 不只记一个 `latestTask`
-- 支持 conversation 下多个 task 的最小索引
-- 为后续更强的控制语义打基础
+- 把 session 内 `recentTasks` 升级为真实任务记录集合
+- 支持更稳定的任务 id 与状态迁移
 
-### 再下一刀：把 `ExecutionCommand / ExecutionEvent` 接入最小 kernel shim
+### 再下一刀：最小 execution kernel shim
 
 优先目标：
 
-- 先打通 planner 风格的最小执行通路
-- 验证控制平面 -> 协议层 -> 执行平面 的链路
+- 让恢复/总结不仅是 prompt rewrite
+- 而是开始进入标准化 `ExecutionCommand / ExecutionEvent` 通路

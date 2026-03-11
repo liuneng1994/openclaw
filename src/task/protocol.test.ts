@@ -31,7 +31,7 @@ describe("task/protocol", () => {
     });
   });
 
-  it("infers control actions for continue/pause/summary/readonly", () => {
+  it("infers control actions for continue/pause/summary/task-list/readonly", () => {
     expect(
       inferControlAction({
         text: "继续",
@@ -53,6 +53,13 @@ describe("task/protocol", () => {
         conversationId: "telegram:1",
       }),
     ).toMatchObject({ type: "request_summary" });
+
+    expect(
+      inferControlAction({
+        text: "任务列表",
+        conversationId: "telegram:1",
+      }),
+    ).toMatchObject({ type: "list_tasks" });
 
     expect(
       inferControlAction({

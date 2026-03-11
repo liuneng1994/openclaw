@@ -194,6 +194,31 @@ export type SessionEntry = {
       updatedAt: number;
       latestRunSessionId?: string;
     };
+    recentTasks?: Array<{
+      id: string;
+      kind:
+        | "ask"
+        | "research_repo"
+        | "modify_code"
+        | "run_tests"
+        | "review_diff"
+        | "resume_task"
+        | "cancel_task";
+      status:
+        | "new"
+        | "planned"
+        | "running"
+        | "blocked"
+        | "waiting_user"
+        | "completed"
+        | "failed"
+        | "cancelled";
+      title: string;
+      conversationId: string;
+      createdAt: number;
+      updatedAt: number;
+      latestRunSessionId?: string;
+    }>;
   };
 };
 
