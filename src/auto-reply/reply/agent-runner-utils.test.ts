@@ -149,6 +149,7 @@ describe("agent-runner-utils", () => {
     expect(resolved.extraSystemPrompt).toContain("Base guard");
     expect(resolved.extraSystemPrompt).toContain("[Execution Policy Guard]");
     expect(resolved.extraSystemPrompt).toContain("Mode: readonly");
+    expect(resolved.executionPolicy).toEqual(run.executionPolicy);
   });
 
   it("builds embedded contexts and scopes auth profile by provider", () => {

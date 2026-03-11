@@ -1,4 +1,5 @@
 import type { ExecToolDefaults } from "../agents/bash-tools.js";
+import type { SandboxToolPolicy } from "../agents/sandbox/types.js";
 import {
   createExecutionCommand,
   createExecutionEvent,
@@ -129,6 +130,32 @@ function resolvePolicyExecOverrides(
   }
   return {
     ask: "on-miss",
+  };
+}
+
+export function resolveExecutionPolicyToolPolicy(
+  policy: ExecutionPolicy | undefined,
+): SandboxToolPolicy | undefined {
+  if (!policy || policy.mode !== "readonly") {
+    return undefined;
+  }
+
+  return {
+    deny: [
+      "write",
+      "edit",
+      "apply_patch",
+      "message",
+      "sessions_send",
+      "tts",
+      "feishu_doc",
+      "feishu_drive",
+      "feishu_wiki",
+      "feishu_bitable_create_app",
+      "feishu_bitable_create_field",
+      "feishu_bitable_create_record",
+      "feishu_bitable_update_record",
+    ],
   };
 }
 

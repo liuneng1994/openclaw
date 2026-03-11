@@ -22,6 +22,7 @@ import type {
 import { isCronSessionKey, isSubagentSessionKey } from "../../../routing/session-key.js";
 import { joinPresentTextSegments } from "../../../shared/text/join-segments.js";
 import { resolveSignalReactionLevel } from "../../../signal/reaction-level.js";
+import { resolveExecutionPolicyToolPolicy } from "../../../task/kernel.js";
 import { resolveTelegramInlineButtonsScope } from "../../../telegram/inline-buttons.js";
 import { resolveTelegramReactionLevel } from "../../../telegram/reaction-level.js";
 import { buildTtsSystemPromptHint } from "../../../tts/tts.js";
@@ -68,6 +69,7 @@ import { createPreparedEmbeddedPiSettingsManager } from "../../pi-project-settin
 import { applyPiAutoCompactionGuard } from "../../pi-settings.js";
 import { toClientToolDefinitions } from "../../pi-tool-definition-adapter.js";
 import { createOpenClawCodingTools, resolveToolLoopDetectionConfig } from "../../pi-tools.js";
+import { filterToolsByPolicy } from "../../pi-tools.policy.js";
 import { resolveSandboxContext } from "../../sandbox.js";
 import { resolveSandboxRuntimeStatus } from "../../sandbox/runtime-status.js";
 import { isXaiProvider } from "../../schema/clean-for-xai.js";
@@ -637,6 +639,12 @@ export function prependSystemPromptAddition(params: {
 }
 
 /** Build runtime context passed into context-engine afterTurn hooks. */
+export function resolveRuntimeExecutionToolPolicy(params: {
+  executionPolicy?: EmbeddedRunAttemptParams["executionPolicy"];
+}) {
+  return resolveExecutionPolicyToolPolicy(params.executionPolicy);
+}
+
 export function buildAfterTurnRuntimeContext(params: {
   attempt: Pick<
     EmbeddedRunAttemptParams,
@@ -842,6 +850,9 @@ export async function runEmbeddedAttempt(
     });
     // Check if the model supports native image input
     const modelHasVision = params.model.input?.includes("image") ?? false;
+    const runtimeExecutionToolPolicy = resolveRuntimeExecutionToolPolicy({
+      executionPolicy: params.executionPolicy,
+    });
     const toolsRaw = params.disableTools
       ? []
       : createOpenClawCodingTools({
@@ -887,7 +898,7 @@ export async function runEmbeddedAttempt(
         });
     const toolsEnabled = supportsModelTools(params.model);
     const tools = sanitizeToolsForGoogle({
-      tools: toolsEnabled ? toolsRaw : [],
+      tools: filterToolsByPolicy(toolsEnabled ? toolsRaw : [], runtimeExecutionToolPolicy),
       provider: params.provider,
     });
     const clientTools = toolsEnabled ? params.clientTools : undefined;

@@ -203,6 +203,7 @@ export function buildEmbeddedRunBaseParams(params: {
     bashElevated: params.run.bashElevated,
     timeoutMs: params.run.timeoutMs,
     extraSystemPrompt: extraSystemPrompt || undefined,
+    executionPolicy: params.run.executionPolicy,
     runId: params.runId,
     allowTransientCooldownProbe: params.allowTransientCooldownProbe,
   };

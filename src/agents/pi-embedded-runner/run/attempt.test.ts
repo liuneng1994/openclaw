@@ -10,6 +10,7 @@ import {
   resolveOllamaCompatNumCtxEnabled,
   resolvePromptBuildHookResult,
   resolvePromptModeForSession,
+  resolveRuntimeExecutionToolPolicy,
   shouldInjectOllamaCompatNumCtx,
   decodeHtmlEntitiesInObject,
   wrapOllamaCompatNumCtx,
@@ -641,6 +642,36 @@ describe("prependSystemPromptAddition", () => {
     });
 
     expect(result).toBe("base system");
+  });
+});
+
+describe("resolveRuntimeExecutionToolPolicy", () => {
+  it("returns readonly tool denylist when execution policy is readonly", () => {
+    const resolved = resolveRuntimeExecutionToolPolicy({
+      executionPolicy: {
+        mode: "readonly",
+        risk: "low",
+        writeIntent: "none",
+        requiresConfirmation: false,
+      },
+    });
+
+    expect(resolved).toMatchObject({
+      deny: expect.arrayContaining(["write", "edit", "apply_patch", "message"]),
+    });
+  });
+
+  it("returns undefined for non-readonly execution policy", () => {
+    const resolved = resolveRuntimeExecutionToolPolicy({
+      executionPolicy: {
+        mode: "ask",
+        risk: "high",
+        writeIntent: "git",
+        requiresConfirmation: true,
+      },
+    });
+
+    expect(resolved).toBeUndefined();
   });
 });
 
