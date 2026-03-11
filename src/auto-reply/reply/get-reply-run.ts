@@ -18,6 +18,7 @@ import {
 import { logVerbose } from "../../globals.js";
 import { clearCommandLane, getQueueSize } from "../../process/command-queue.js";
 import { normalizeMainKey } from "../../routing/session-key.js";
+import { resolveExecutionKernelPlan } from "../../task/kernel.js";
 import {
   applyTaskRouterSnapshot,
   resolveTaskRouterDecision,
@@ -434,7 +435,11 @@ export async function runPreparedReply(
     conversationId: sessionKey ?? sessionId ?? normalizeMainKey(agentId),
     sessionEntry,
   });
-  prefixedCommandBody = taskRouterDecision.rewrittenText;
+  const executionKernelPlan = resolveExecutionKernelPlan({
+    decision: taskRouterDecision,
+    originalPrompt: taskRouterDecision.rewrittenText,
+  });
+  prefixedCommandBody = executionKernelPlan.promptText ?? taskRouterDecision.rewrittenText;
   if (!resolvedThinkLevel) {
     resolvedThinkLevel = await modelState.resolveDefaultThinkingLevel();
   }
@@ -590,8 +595,8 @@ export async function runPreparedReply(
   let queuedBody = mediaNote
     ? [mediaNote, mediaReplyHint, queueBodyBase].filter(Boolean).join("\n").trim()
     : queueBodyBase;
-  if (taskRouterDecision.matchedExistingTask) {
-    queuedBody = taskRouterDecision.rewrittenText;
+  if (taskRouterDecision.matchedExistingTask || executionKernelPlan.promptText) {
+    queuedBody = executionKernelPlan.promptText ?? taskRouterDecision.rewrittenText;
   }
   const resolvedQueue = resolveQueueSettings({
     cfg,

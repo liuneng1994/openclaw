@@ -171,6 +171,37 @@ describe("runPreparedReply media-only handling", () => {
     vi.mocked(clearCommandLane).mockReturnValue(0);
   });
 
+  it("injects execution kernel metadata for new execution tasks", async () => {
+    await runPreparedReply(
+      baseParams({
+        ctx: {
+          Body: "fix router",
+          RawBody: "fix router",
+          CommandBody: "fix router",
+          ThreadHistoryBody: "Earlier message in this thread",
+          OriginatingChannel: "slack",
+          OriginatingTo: "C123",
+          ChatType: "group",
+        },
+        sessionCtx: {
+          Body: "fix router",
+          BodyStripped: "fix router",
+          ThreadHistoryBody: "Earlier message in this thread",
+          Provider: "slack",
+          ChatType: "group",
+          OriginatingChannel: "slack",
+          OriginatingTo: "C123",
+        },
+      }),
+    );
+
+    const call = vi.mocked(runReplyAgent).mock.calls[0]?.[0];
+    expect(call?.commandBody).toContain("[Execution Kernel]");
+    expect(call?.commandBody).toContain("Command Type: start_session");
+    expect(call?.commandBody).toContain("Task ID:");
+    expect(call?.followupRun.prompt).toContain("[Execution Kernel]");
+  });
+
   it("allows media-only prompts and preserves thread context in queued followups", async () => {
     const result = await runPreparedReply(baseParams());
     expect(result).toEqual({ text: "ok" });

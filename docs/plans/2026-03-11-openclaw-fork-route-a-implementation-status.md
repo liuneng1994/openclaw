@@ -345,3 +345,84 @@
 这一阶段的主聊天通路已经从“只记住最近任务”推进为：
 
 > 不仅能记住最近任务，也开始能区分“最近任务快照”与“当前是否真有 embedded run 还在跑”，并据此让 `继续 / 取消` 的行为更贴近真实运行态。
+
+---
+
+# 新增推进：Execution Kernel Seam / Shim（最小版）
+
+## 已完成追加
+
+### 1. 新增最小 execution kernel 规划层
+
+已落地：
+
+- 新增 `src/task/kernel.ts`
+- 将 task router 的结果提升为结构化 execution plan：
+  - `ExecutionCommand`
+  - `ExecutionEvent[]`
+  - 可注入现有 agent runtime 的 `promptText`
+
+当前已支持的最小 command 映射：
+
+- 新执行型请求 → `start_session`
+- `继续` → `resume_session`
+- `总结一下` → `request_summary`
+- `只分析` → `apply_permission_update`
+
+### 2. 已把 execution kernel seam 接入 reply 主路径
+
+已落地：
+
+- 在 `src/auto-reply/reply/get-reply-run.ts` 中，task router 决策后会进一步生成 execution kernel 计划
+- 当命中 execution-bearing task 时：
+  - `commandBody` 会被注入 `[Execution Kernel]` 结构化控制信息
+  - `followupRun.prompt` 也会同步带上同样的 execution kernel 元数据
+
+这意味着：
+
+- 当前系统不再只靠 `[Task Router]` prompt rewrite 驱动恢复/总结
+- 而是开始拥有一条最小的：
+  - `TaskIntent / ControlAction`
+  - → `ExecutionCommand / ExecutionEvent`
+  - → 现有 reply runtime
+    的协议接缝
+
+### 3. 新增测试覆盖
+
+已新增：
+
+- `src/task/kernel.test.ts`
+
+新增覆盖点：
+
+- new execution task → `start_session`
+- `继续` → `resume_session`
+- `总结一下` → `request_summary`
+- non execution-bearing task → no kernel plan
+- `get-reply-run` 对 execution kernel metadata 的主路径注入
+
+## 最新测试结果
+
+当前定向回归结果为：
+
+- `src/task/types.test.ts`
+- `src/task/protocol.test.ts`
+- `src/task/state.test.ts`
+- `src/task/router.test.ts`
+- `src/task/kernel.test.ts`
+- `src/auto-reply/reply/get-reply-run.media-only.test.ts`
+
+结果：
+
+- `6` 个测试文件
+- `41/41 tests passed`
+
+## 阶段判断
+
+截至这一版，Route A 已经从：
+
+> 仅有 task snapshot + task-aware control shim
+
+推进到：
+
+> 拥有一个最小 execution kernel seam，能够把聊天控制语义结构化成 execution command/event，并注入现有 reply runtime 继续执行。
