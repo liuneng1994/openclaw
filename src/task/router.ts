@@ -103,7 +103,26 @@ function buildResumePrompt(task: TaskRecord): string {
   ].join("\n");
 }
 
-function buildSummaryPrompt(task: TaskRecord): string {
+function formatApprovalKind(kind: "git" | "external"): string {
+  return kind === "git" ? "git 变更" : "外部动作";
+}
+
+function buildApprovalReadoutLines(snapshot: TaskRouterSnapshot, task: TaskRecord): string[] {
+  const lines: string[] = [];
+  if (snapshot.pendingApproval && snapshot.pendingApproval.taskId === task.id) {
+    lines.push(
+      `Pending Approval: ${snapshot.pendingApproval.status} (${formatApprovalKind(snapshot.pendingApproval.kind)})`,
+    );
+  }
+  if (snapshot.lastApprovalOutcome && snapshot.lastApprovalOutcome.taskId === task.id) {
+    lines.push(
+      `Last Approval Outcome: ${snapshot.lastApprovalOutcome.outcome} (${formatApprovalKind(snapshot.lastApprovalOutcome.kind)})`,
+    );
+  }
+  return lines;
+}
+
+function buildSummaryPrompt(task: TaskRecord, snapshot: TaskRouterSnapshot): string {
   return [
     "[Task Router]",
     "The user asked for a summary of the latest active/resumable task in this conversation.",
@@ -112,16 +131,18 @@ function buildSummaryPrompt(task: TaskRecord): string {
     `Task Kind: ${task.kind}`,
     `Task Status: ${task.status}`,
     ...buildRunSnapshotLines(task),
-    "Instruction: Summarize the current task state, progress, blockers, and recommended next step.",
+    ...buildApprovalReadoutLines(snapshot, task),
+    "Instruction: Summarize the current task state, progress, blockers, and recommended next step. When approval readouts are present, briefly explain them in concise Chinese.",
     "Original user message: 总结一下",
   ].join("\n");
 }
 
-function buildTaskListPrompt(tasks: TaskRecord[]): string {
-  const lines = tasks.map(
-    (task, index) =>
-      `${index + 1}. [${task.status}] ${task.title} (id=${task.id}, kind=${task.kind})`,
-  );
+function buildTaskListPrompt(tasks: TaskRecord[], snapshot: TaskRouterSnapshot): string {
+  const lines = tasks.map((task, index) => {
+    const approvalHints = buildApprovalReadoutLines(snapshot, task);
+    const suffix = index === 0 && approvalHints.length > 0 ? ` | ${approvalHints.join(" | ")}` : "";
+    return `${index + 1}. [${task.status}] ${task.title} (id=${task.id}, kind=${task.kind})${suffix}`;
+  });
   return [
     "[Task Router]",
     "The user asked to list the recent tracked tasks in this conversation.",
@@ -390,10 +411,20 @@ export function resolveTaskRouterDecision(input: {
       updatedAt: now,
     };
     recentTasks = upsertRecentTasks(recentTasks, latestTask);
-    rewrittenText = buildSummaryPrompt(latestTask);
+    rewrittenText = buildSummaryPrompt(latestTask, {
+      latestTask,
+      recentTasks,
+      pendingApproval,
+      lastApprovalOutcome,
+    });
     matchedExistingTask = true;
   } else if (controlAction?.type === "list_tasks") {
-    rewrittenText = buildTaskListPrompt(recentTasks);
+    rewrittenText = buildTaskListPrompt(recentTasks, {
+      latestTask,
+      recentTasks,
+      pendingApproval,
+      lastApprovalOutcome,
+    });
     matchedExistingTask = recentTasks.length > 0;
   } else if (controlAction?.type === "pause" && latestTask) {
     latestTask = {

@@ -239,6 +239,66 @@ describe("task/router", () => {
     expect(decision.rewrittenText).toContain("fix router");
   });
 
+  it("surfaces approval readout on the latest task in task list prompts", () => {
+    const decision = resolveTaskRouterDecision({
+      text: "任务列表",
+      conversationId: "telegram:1",
+      sessionEntry: {
+        sessionId: "session-1",
+        updatedAt: 1,
+        taskRouter: {
+          latestTask: {
+            id: "task-2",
+            kind: "run_tests",
+            status: "running",
+            title: "run tests",
+            conversationId: "telegram:1",
+            createdAt: 2,
+            updatedAt: 3,
+          },
+          recentTasks: [
+            {
+              id: "task-2",
+              kind: "run_tests",
+              status: "running",
+              title: "run tests",
+              conversationId: "telegram:1",
+              createdAt: 2,
+              updatedAt: 3,
+            },
+            {
+              id: "task-1",
+              kind: "modify_code",
+              status: "waiting_user",
+              title: "fix router",
+              conversationId: "telegram:1",
+              createdAt: 1,
+              updatedAt: 2,
+            },
+          ],
+          pendingApproval: {
+            kind: "git",
+            status: "pending",
+            taskId: "task-2",
+            runSessionId: "run-2",
+            summary: "git commit",
+            createdAt: Date.now(),
+          },
+          lastApprovalOutcome: {
+            kind: "git",
+            taskId: "task-2",
+            runSessionId: "run-2",
+            outcome: "expired",
+            updatedAt: Date.now(),
+          },
+        },
+      },
+    });
+
+    expect(decision.rewrittenText).toContain("Pending Approval: pending (git 变更)");
+    expect(decision.rewrittenText).toContain("Last Approval Outcome: expired (git 变更)");
+  });
+
   it("rewrites approval confirmation into a resume instruction when approval is pending", () => {
     const entry: SessionEntry = {
       sessionId: "session-1",
@@ -954,6 +1014,55 @@ describe("task/router", () => {
     expect(decision.controlAction?.type).toBe("request_summary");
     expect(decision.snapshot.pendingApproval).toBeUndefined();
     expect(decision.rewrittenText).toContain("Summarize the current task state");
+  });
+
+  it("surfaces approval readout in summary prompts", () => {
+    const decision = resolveTaskRouterDecision({
+      text: "总结一下",
+      conversationId: "telegram:1",
+      sessionEntry: {
+        sessionId: "session-1",
+        updatedAt: 1,
+        taskRouter: {
+          latestTask: {
+            id: "task-1",
+            kind: "modify_code",
+            status: "waiting_user",
+            title: "fix router",
+            conversationId: "telegram:1",
+            createdAt: 1,
+            updatedAt: 2,
+            latestRunSessionId: "run-1",
+            latestRunSession: {
+              id: "run-1",
+              status: "paused",
+              agentProfile: "builder",
+              updatedAt: 2,
+            },
+          },
+          recentTasks: [],
+          pendingApproval: {
+            kind: "external",
+            status: "pending",
+            taskId: "task-1",
+            runSessionId: "run-1",
+            summary: "message send",
+            createdAt: Date.now(),
+          },
+          lastApprovalOutcome: {
+            kind: "external",
+            taskId: "task-1",
+            runSessionId: "run-1",
+            outcome: "rejected",
+            updatedAt: Date.now(),
+          },
+        },
+      },
+    });
+
+    expect(decision.rewrittenText).toContain("Pending Approval: pending (外部动作)");
+    expect(decision.rewrittenText).toContain("Last Approval Outcome: rejected (外部动作)");
+    expect(decision.rewrittenText).toContain("briefly explain them in concise Chinese");
   });
 
   it("preserves pending approval while updating run progress", () => {
