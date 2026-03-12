@@ -381,6 +381,58 @@ describe("runPreparedReply media-only handling", () => {
     expect(vi.mocked(runReplyAgent)).toHaveBeenCalledTimes(0);
   });
 
+  it("reports an expired approval with unified copy", async () => {
+    const result = await runPreparedReply(
+      baseParams({
+        ctx: {
+          Body: "确认执行",
+          RawBody: "确认执行",
+          CommandBody: "确认执行",
+          ThreadHistoryBody: "",
+          OriginatingChannel: "slack",
+          OriginatingTo: "C123",
+          ChatType: "group",
+        },
+        sessionCtx: {
+          Body: "确认执行",
+          BodyStripped: "确认执行",
+          ThreadHistoryBody: "",
+          Provider: "slack",
+          ChatType: "group",
+          OriginatingChannel: "slack",
+          OriginatingTo: "C123",
+        },
+        sessionEntry: {
+          taskRouter: {
+            latestTask: {
+              id: "task-1",
+              kind: "modify_code",
+              status: "waiting_user",
+              title: "fix router",
+              conversationId: "session-key",
+              createdAt: 1,
+              updatedAt: 2,
+            },
+            recentTasks: [],
+            pendingApproval: {
+              kind: "git",
+              status: "pending",
+              taskId: "task-1",
+              runSessionId: "run-1",
+              summary: 'git commit -m "x"',
+              createdAt: Date.now() - 31 * 60 * 1000,
+            },
+          },
+        } as never,
+      }),
+    );
+
+    expect(result).toEqual({
+      text: "这次待确认动作已失效，Master。请重新下达执行指令，我会按当前状态重新评估并在需要时再次请求确认。",
+    });
+    expect(vi.mocked(runReplyAgent)).toHaveBeenCalledTimes(0);
+  });
+
   it("uses fallback approval resolution when the task matches but run session drifted", async () => {
     await runPreparedReply(
       baseParams({
@@ -486,7 +538,7 @@ describe("runPreparedReply media-only handling", () => {
     );
 
     expect(result).toEqual({
-      text: "这次待确认动作已过期或上下文已经变化，Master。我先没有继续执行；请重新下达执行指令，我会按当前状态重新评估并在需要时再次请求确认。",
+      text: "这次待确认动作的上下文已经变化，Master。我先没有继续执行；请重新下达执行指令，我会按当前状态重新评估并在需要时再次请求确认。",
     });
     expect(vi.mocked(runReplyAgent)).toHaveBeenCalledTimes(0);
   });

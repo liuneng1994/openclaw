@@ -110,6 +110,22 @@ function buildTaskControlAck(params: {
   return `已执行取消，Master。当前任务已标记为取消${titleSuffix}；此刻没有发现可中断的活动运行。`;
 }
 
+function buildApprovalUxMessage(params: {
+  kind: "rejected" | "duplicate" | "expired" | "context_mismatch";
+  approvalKind?: "git" | "external";
+}): string {
+  if (params.kind === "rejected") {
+    return `好的，已先不执行这次${params.approvalKind === "git" ? "git 变更" : "外部动作"}。当前任务保持等待您下一步指令。`;
+  }
+  if (params.kind === "duplicate") {
+    return "这次确认已在恢复流程中，Master。我不会重复放行；若当前恢复未成功，请重新下达执行指令，我会按最新上下文重新评估。";
+  }
+  if (params.kind === "expired") {
+    return "这次待确认动作已失效，Master。请重新下达执行指令，我会按当前状态重新评估并在需要时再次请求确认。";
+  }
+  return "这次待确认动作的上下文已经变化，Master。我先没有继续执行；请重新下达执行指令，我会按当前状态重新评估并在需要时再次请求确认。";
+}
+
 function resolveActiveTaskRun(params: {
   sessionEntry?: SessionEntry;
   sessionId?: string;
@@ -524,7 +540,10 @@ export async function runPreparedReply(
   if (controlAction?.type === "reject_execution" && sessionPendingApproval) {
     typing.cleanup();
     return {
-      text: `好的，已先不执行这次${sessionPendingApproval.kind === "git" ? "git 变更" : "外部动作"}。当前任务保持等待您下一步指令。`,
+      text: buildApprovalUxMessage({
+        kind: "rejected",
+        approvalKind: sessionPendingApproval.kind,
+      }),
     };
   }
   if (
@@ -533,7 +552,9 @@ export async function runPreparedReply(
   ) {
     typing.cleanup();
     return {
-      text: "这次确认已在恢复流程中，Master。我不会重复放行；若当前恢复未成功，请重新下达执行指令，我会按最新上下文重新评估。",
+      text: buildApprovalUxMessage({
+        kind: taskRouterDecision.snapshot.pendingApproval === undefined ? "expired" : "duplicate",
+      }),
     };
   }
   if (
@@ -543,10 +564,12 @@ export async function runPreparedReply(
   ) {
     typing.cleanup();
     return {
-      text:
-        sessionPendingApproval.status === "pending"
-          ? "这次待确认动作已过期或上下文已经变化，Master。我先没有继续执行；请重新下达执行指令，我会按当前状态重新评估并在需要时再次请求确认。"
-          : "这次待确认动作的上下文已经变化，Master。我先没有继续执行；请重新下达执行指令，我会按当前状态重新评估并在需要时再次请求确认。",
+      text: buildApprovalUxMessage({
+        kind:
+          taskRouterDecision.snapshot.pendingApproval === undefined
+            ? "expired"
+            : "context_mismatch",
+      }),
     };
   }
   const latestTask = activeTaskRun.latestTask;
