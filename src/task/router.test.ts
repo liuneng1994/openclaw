@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { SessionEntry } from "../config/sessions.js";
 import {
   applyTaskRouterSnapshot,
@@ -8,6 +8,7 @@ import {
 } from "./router.js";
 
 describe("task/router", () => {
+  const NOW = new Date("2026-03-12T09:56:00+08:00").getTime();
   it("tracks a new execution task in the session snapshot", () => {
     const decision = resolveTaskRouterDecision({
       text: "研究这个 repo 的 session 架构",
@@ -266,7 +267,7 @@ describe("task/router", () => {
           taskId: "task-1",
           runSessionId: "run-1",
           summary: 'git commit -m "x"',
-          createdAt: 3,
+          createdAt: Date.now(),
         },
       },
     };
@@ -318,7 +319,7 @@ describe("task/router", () => {
           taskId: "task-1",
           runSessionId: "run-1",
           summary: 'git commit -m "x"',
-          createdAt: 3,
+          createdAt: Date.now(),
         },
       },
     };
@@ -363,7 +364,7 @@ describe("task/router", () => {
           taskId: "task-1",
           runSessionId: "run-1",
           summary: "message send",
-          createdAt: 3,
+          createdAt: Date.now(),
         },
       },
     };
@@ -382,6 +383,45 @@ describe("task/router", () => {
       taskId: "task-1",
     });
     expect(decision.rewrittenText).toBe("确认执行");
+  });
+
+  it("expires pending approval before confirmation after ttl", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+
+    const decision = resolveTaskRouterDecision({
+      text: "确认执行",
+      conversationId: "telegram:1",
+      sessionEntry: {
+        sessionId: "session-1",
+        updatedAt: 1,
+        taskRouter: {
+          latestTask: {
+            id: "task-1",
+            kind: "modify_code",
+            status: "waiting_user",
+            title: "fix router",
+            conversationId: "telegram:1",
+            createdAt: 1,
+            updatedAt: 2,
+          },
+          recentTasks: [],
+          pendingApproval: {
+            kind: "git",
+            status: "pending",
+            taskId: "task-1",
+            runSessionId: "run-1",
+            summary: "git commit",
+            createdAt: NOW - 31 * 60 * 1000,
+          },
+        },
+      },
+    });
+
+    expect(decision.controlAction?.type).toBe("confirm_execution");
+    expect(decision.pendingApprovalResolution).toBeUndefined();
+    expect(decision.snapshot.pendingApproval).toBeUndefined();
+    vi.useRealTimers();
   });
 
   it("does not reuse an approval already marked as resuming", () => {
@@ -405,8 +445,8 @@ describe("task/router", () => {
           taskId: "task-1",
           runSessionId: "run-1",
           summary: 'git commit -m "x"',
-          createdAt: 3,
-          resumingAt: 4,
+          createdAt: Date.now(),
+          resumingAt: Date.now(),
         },
       },
     };
@@ -446,8 +486,9 @@ describe("task/router", () => {
       },
       pendingApproval: {
         kind: "external",
+        status: "pending",
         summary: "message send",
-        createdAt: 3,
+        createdAt: Date.now(),
       },
     });
 
@@ -683,6 +724,45 @@ describe("task/router", () => {
     expect(next?.taskRouter?.pendingApproval).toBeUndefined();
   });
 
+  it("expires stale resuming approval on confirm", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+
+    const decision = resolveTaskRouterDecision({
+      text: "确认执行",
+      conversationId: "telegram:1",
+      sessionEntry: {
+        sessionId: "session-1",
+        updatedAt: 1,
+        taskRouter: {
+          latestTask: {
+            id: "task-1",
+            kind: "modify_code",
+            status: "waiting_user",
+            title: "fix router",
+            conversationId: "telegram:1",
+            createdAt: 1,
+            updatedAt: 2,
+          },
+          recentTasks: [],
+          pendingApproval: {
+            kind: "git",
+            status: "resuming",
+            taskId: "task-1",
+            runSessionId: "run-1",
+            summary: "git commit",
+            createdAt: NOW - 10 * 60 * 1000,
+            resumingAt: NOW - 6 * 60 * 1000,
+          },
+        },
+      },
+    });
+
+    expect(decision.pendingApprovalResolution).toBeUndefined();
+    expect(decision.snapshot.pendingApproval).toBeUndefined();
+    vi.useRealTimers();
+  });
+
   it("clears stale resuming approval on ordinary continue control", () => {
     const decision = resolveTaskRouterDecision({
       text: "继续",
@@ -724,6 +804,52 @@ describe("task/router", () => {
     expect(decision.controlAction?.type).toBe("continue");
     expect(decision.snapshot.pendingApproval).toBeUndefined();
     expect(decision.snapshot.latestTask?.status).toBe("running");
+  });
+
+  it("clears expired pending approval on ordinary continue control", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+
+    const decision = resolveTaskRouterDecision({
+      text: "继续",
+      conversationId: "telegram:1",
+      sessionEntry: {
+        sessionId: "session-1",
+        updatedAt: 1,
+        taskRouter: {
+          latestTask: {
+            id: "task-1",
+            kind: "modify_code",
+            status: "waiting_user",
+            title: "fix router",
+            conversationId: "telegram:1",
+            createdAt: 1,
+            updatedAt: 2,
+            latestRunSessionId: "run-1",
+            latestRunSession: {
+              id: "run-1",
+              status: "paused",
+              agentProfile: "builder",
+              updatedAt: 2,
+            },
+          },
+          recentTasks: [],
+          pendingApproval: {
+            kind: "git",
+            status: "pending",
+            taskId: "task-1",
+            runSessionId: "run-1",
+            summary: "git commit",
+            createdAt: NOW - 31 * 60 * 1000,
+          },
+        },
+      },
+    });
+
+    expect(decision.controlAction?.type).toBe("continue");
+    expect(decision.snapshot.pendingApproval).toBeUndefined();
+    expect(decision.snapshot.latestTask?.status).toBe("running");
+    vi.useRealTimers();
   });
 
   it("clears stale resuming approval on summary control", () => {

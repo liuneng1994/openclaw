@@ -134,6 +134,8 @@ Consumption rules:
 - terminal task states (`completed`, `failed`, `cancelled`) clear any approval bound to that task
 - a `resuming` approval interrupted by cancellation is cleared instead of falling back to reusable state
 - ordinary `continue` / `request_summary` control turns do not consume or revive stale approval state
+- `pending` approvals expire after 30 minutes; confirmation after expiry clears them and asks the user to re-issue the execution request
+- `resuming` approvals expire after 5 minutes; stale `resuming` state is cleared before ordinary control handling continues
 
 #### Gate trips
 

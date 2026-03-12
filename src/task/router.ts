@@ -15,6 +15,8 @@ import {
 } from "./types.js";
 
 const MAX_RECENT_TASKS = 5;
+const PENDING_APPROVAL_TTL_MS = 30 * 60 * 1000;
+const RESUMING_APPROVAL_TTL_MS = 5 * 60 * 1000;
 
 export type TaskPendingApproval = {
   kind: "git" | "external";
@@ -194,6 +196,17 @@ function isTerminalTaskStatus(status: TaskRecord["status"] | undefined): boolean
   return status === "completed" || status === "failed" || status === "cancelled";
 }
 
+function isPendingApprovalExpired(approval: TaskPendingApproval | undefined, now: number): boolean {
+  if (!approval) {
+    return false;
+  }
+  if (approval.status === "pending") {
+    return now - approval.createdAt > PENDING_APPROVAL_TTL_MS;
+  }
+  const startedAt = approval.resumingAt ?? approval.createdAt;
+  return now - startedAt > RESUMING_APPROVAL_TTL_MS;
+}
+
 function shouldClearApprovalForTask(
   approval: TaskPendingApproval | undefined,
   task: TaskRecord | undefined,
@@ -264,10 +277,14 @@ export function resolveTaskRouterDecision(input: {
     conversationId: input.conversationId,
   });
   const snapshot = normalizeSnapshot(input.sessionEntry?.taskRouter);
+  const now = Date.now();
   let latestTask = snapshot.latestTask;
   let recentTasks = snapshot.recentTasks ?? [];
   let pendingApproval = snapshot.pendingApproval;
-  if (shouldClearApprovalForTask(pendingApproval, latestTask)) {
+  const expiredApproval = isPendingApprovalExpired(pendingApproval, now)
+    ? pendingApproval
+    : undefined;
+  if (expiredApproval || shouldClearApprovalForTask(pendingApproval, latestTask)) {
     pendingApproval = undefined;
   }
   let rewrittenText = input.text;
@@ -293,7 +310,7 @@ export function resolveTaskRouterDecision(input: {
       latestTask = {
         ...pendingApprovalResolution.task,
         status: "running",
-        updatedAt: Date.now(),
+        updatedAt: now,
       };
       recentTasks = upsertRecentTasks(recentTasks, latestTask);
       rewrittenText = buildApprovalConfirmPrompt(
@@ -304,7 +321,7 @@ export function resolveTaskRouterDecision(input: {
       pendingApproval = {
         ...pendingApprovalResolution.approval,
         status: "resuming",
-        resumingAt: Date.now(),
+        resumingAt: now,
       };
       matchedExistingTask = true;
     }
@@ -312,7 +329,7 @@ export function resolveTaskRouterDecision(input: {
     latestTask = {
       ...latestTask,
       status: "waiting_user",
-      updatedAt: Date.now(),
+      updatedAt: now,
     };
     recentTasks = upsertRecentTasks(recentTasks, latestTask);
     pendingApproval = undefined;
@@ -321,7 +338,7 @@ export function resolveTaskRouterDecision(input: {
     latestTask = {
       ...resumableTask,
       status: "running",
-      updatedAt: Date.now(),
+      updatedAt: now,
     };
     recentTasks = upsertRecentTasks(recentTasks, latestTask);
     rewrittenText = buildResumePrompt(latestTask);
@@ -329,7 +346,7 @@ export function resolveTaskRouterDecision(input: {
   } else if (controlAction?.type === "request_summary" && resumableTask) {
     latestTask = {
       ...resumableTask,
-      updatedAt: Date.now(),
+      updatedAt: now,
     };
     recentTasks = upsertRecentTasks(recentTasks, latestTask);
     rewrittenText = buildSummaryPrompt(latestTask);
@@ -341,14 +358,14 @@ export function resolveTaskRouterDecision(input: {
     latestTask = {
       ...latestTask,
       status: "waiting_user",
-      updatedAt: Date.now(),
+      updatedAt: now,
     };
     recentTasks = updateExistingTaskStatus(recentTasks, latestTask.id, () => latestTask!);
   } else if (taskIntent.kind === "cancel_task" && latestTask) {
     latestTask = {
       ...latestTask,
       status: "cancelled",
-      updatedAt: Date.now(),
+      updatedAt: now,
     };
     recentTasks = updateExistingTaskStatus(recentTasks, latestTask.id, () => latestTask!);
     if (shouldClearApprovalForTask(pendingApproval, latestTask)) {
@@ -362,7 +379,6 @@ export function resolveTaskRouterDecision(input: {
     pendingApproval = undefined;
     const taskId = createTaskId(input.conversationId, input.text);
     const runSessionId = createRunSessionId(taskId);
-    const now = Date.now();
     const nextTask: TaskRecord = {
       id: taskId,
       kind: taskIntent.kind,

@@ -543,7 +543,10 @@ export async function runPreparedReply(
   ) {
     typing.cleanup();
     return {
-      text: "这次待确认动作的上下文已经变化，Master。我先没有继续执行；请重新下达执行指令，我会按当前状态重新评估并在需要时再次请求确认。",
+      text:
+        sessionPendingApproval.status === "pending"
+          ? "这次待确认动作已过期或上下文已经变化，Master。我先没有继续执行；请重新下达执行指令，我会按当前状态重新评估并在需要时再次请求确认。"
+          : "这次待确认动作的上下文已经变化，Master。我先没有继续执行；请重新下达执行指令，我会按当前状态重新评估并在需要时再次请求确认。",
     };
   }
   const latestTask = activeTaskRun.latestTask;

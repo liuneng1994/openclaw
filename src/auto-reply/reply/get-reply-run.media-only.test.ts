@@ -311,7 +311,7 @@ describe("runPreparedReply media-only handling", () => {
               taskId: "task-1",
               runSessionId: "run-1",
               summary: 'git commit -m "x"',
-              createdAt: 3,
+              createdAt: Date.now(),
             },
           },
         } as never,
@@ -367,8 +367,8 @@ describe("runPreparedReply media-only handling", () => {
               taskId: "task-1",
               runSessionId: "run-1",
               summary: 'git commit -m "x"',
-              createdAt: 3,
-              resumingAt: 4,
+              createdAt: Date.now(),
+              resumingAt: Date.now(),
             },
           },
         } as never,
@@ -427,7 +427,7 @@ describe("runPreparedReply media-only handling", () => {
               taskId: "task-1",
               runSessionId: "run-1",
               summary: 'git commit -m "x"',
-              createdAt: 3,
+              createdAt: Date.now(),
             },
           },
         } as never,
@@ -478,7 +478,7 @@ describe("runPreparedReply media-only handling", () => {
               taskId: "task-1",
               runSessionId: "run-1",
               summary: "message send",
-              createdAt: 3,
+              createdAt: Date.now(),
             },
           },
         } as never,
@@ -486,7 +486,7 @@ describe("runPreparedReply media-only handling", () => {
     );
 
     expect(result).toEqual({
-      text: "这次待确认动作的上下文已经变化，Master。我先没有继续执行；请重新下达执行指令，我会按当前状态重新评估并在需要时再次请求确认。",
+      text: "这次待确认动作已过期或上下文已经变化，Master。我先没有继续执行；请重新下达执行指令，我会按当前状态重新评估并在需要时再次请求确认。",
     });
     expect(vi.mocked(runReplyAgent)).toHaveBeenCalledTimes(0);
   });
@@ -528,7 +528,7 @@ describe("runPreparedReply media-only handling", () => {
               kind: "external",
               status: "pending",
               summary: "message send",
-              createdAt: 3,
+              createdAt: Date.now(),
             },
           },
         } as never,
