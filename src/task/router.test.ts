@@ -255,6 +255,13 @@ describe("task/router", () => {
             conversationId: "telegram:1",
             createdAt: 2,
             updatedAt: 3,
+            latestRunSessionId: "run-2",
+            latestRunSession: {
+              id: "run-2",
+              status: "testing",
+              agentProfile: "builder",
+              updatedAt: 3,
+            },
           },
           recentTasks: [
             {
@@ -265,6 +272,13 @@ describe("task/router", () => {
               conversationId: "telegram:1",
               createdAt: 2,
               updatedAt: 3,
+              latestRunSessionId: "run-2",
+              latestRunSession: {
+                id: "run-2",
+                status: "testing",
+                agentProfile: "builder",
+                updatedAt: 3,
+              },
             },
             {
               id: "task-1",
@@ -295,6 +309,8 @@ describe("task/router", () => {
       },
     });
 
+    expect(decision.rewrittenText).toContain("Latest Run Phase: testing");
+    expect(decision.rewrittenText).toContain("Latest Run Profile: builder");
     expect(decision.rewrittenText).toContain("Pending Approval: pending (git 变更)");
     expect(decision.rewrittenText).toContain("Last Approval Outcome: expired (git 变更)");
   });
@@ -1060,6 +1076,8 @@ describe("task/router", () => {
       },
     });
 
+    expect(decision.rewrittenText).toContain("Latest Run Phase: paused");
+    expect(decision.rewrittenText).toContain("Latest Run Profile: builder");
     expect(decision.rewrittenText).toContain("Pending Approval: pending (外部动作)");
     expect(decision.rewrittenText).toContain("Last Approval Outcome: rejected (外部动作)");
     expect(decision.rewrittenText).toContain("briefly explain them in concise Chinese");

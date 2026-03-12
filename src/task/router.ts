@@ -113,6 +113,14 @@ function formatApprovalKind(kind: "git" | "external"): string {
   return kind === "git" ? "git 变更" : "外部动作";
 }
 
+function buildRunReadoutLines(task: TaskRecord): string[] {
+  const run = getLatestRunSnapshot(task);
+  if (!run) {
+    return [];
+  }
+  return [`Latest Run Phase: ${run.status}`, `Latest Run Profile: ${run.agentProfile}`];
+}
+
 function buildApprovalReadoutLines(snapshot: TaskRouterSnapshot, task: TaskRecord): string[] {
   const lines: string[] = [];
   if (snapshot.pendingApproval && snapshot.pendingApproval.taskId === task.id) {
@@ -137,16 +145,19 @@ function buildSummaryPrompt(task: TaskRecord, snapshot: TaskRouterSnapshot): str
     `Task Kind: ${task.kind}`,
     `Task Status: ${task.status}`,
     ...buildRunSnapshotLines(task),
+    ...buildRunReadoutLines(task),
     ...buildApprovalReadoutLines(snapshot, task),
-    "Instruction: Summarize the current task state, progress, blockers, and recommended next step. When approval readouts are present, briefly explain them in concise Chinese.",
+    "Instruction: Summarize the current task state, progress, blockers, and recommended next step. When run or approval readouts are present, briefly explain them in concise Chinese.",
     "Original user message: 总结一下",
   ].join("\n");
 }
 
 function buildTaskListPrompt(tasks: TaskRecord[], snapshot: TaskRouterSnapshot): string {
   const lines = tasks.map((task, index) => {
+    const runHints = buildRunReadoutLines(task);
     const approvalHints = buildApprovalReadoutLines(snapshot, task);
-    const suffix = index === 0 && approvalHints.length > 0 ? ` | ${approvalHints.join(" | ")}` : "";
+    const hints = index === 0 ? [...runHints, ...approvalHints] : [];
+    const suffix = hints.length > 0 ? ` | ${hints.join(" | ")}` : "";
     return `${index + 1}. [${task.status}] ${task.title} (id=${task.id}, kind=${task.kind})${suffix}`;
   });
   return [
