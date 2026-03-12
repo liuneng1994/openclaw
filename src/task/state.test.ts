@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { countActiveTasksForConversation, findLatestResumableTask } from "./state.js";
+import {
+  countActiveTasksForConversation,
+  findLatestResumableTask,
+  getLatestRunSessionId,
+  getLatestRunSnapshot,
+  updateTaskLatestRunSnapshot,
+} from "./state.js";
 import type { TaskRecord } from "./types.js";
 
 describe("task/state", () => {
@@ -41,5 +47,58 @@ describe("task/state", () => {
 
   it("counts active tasks for a conversation", () => {
     expect(countActiveTasksForConversation({ tasks, conversationId: "telegram:1" })).toBe(2);
+  });
+
+  it("resolves latest run snapshot and id from a task", () => {
+    const task: TaskRecord = {
+      id: "task-run",
+      kind: "modify_code",
+      status: "running",
+      title: "run",
+      conversationId: "telegram:1",
+      createdAt: 1,
+      updatedAt: 2,
+      latestRunSessionId: "run-1",
+      latestRunSession: {
+        id: "run-1",
+        status: "building",
+        agentProfile: "builder",
+        updatedAt: 2,
+      },
+    };
+
+    expect(getLatestRunSessionId(task)).toBe("run-1");
+    expect(getLatestRunSnapshot(task)).toMatchObject({
+      id: "run-1",
+      status: "building",
+      agentProfile: "builder",
+    });
+  });
+
+  it("updates task latest run snapshot through a shared helper", () => {
+    const next = updateTaskLatestRunSnapshot({
+      task: {
+        id: "task-run",
+        kind: "run_tests",
+        status: "running",
+        title: "run",
+        conversationId: "telegram:1",
+        createdAt: 1,
+        updatedAt: 2,
+      },
+      runSessionId: "run-2",
+      runStatus: "testing",
+      taskStatus: "waiting_user",
+      now: 10,
+    });
+
+    expect(next.status).toBe("waiting_user");
+    expect(next.latestRunSessionId).toBe("run-2");
+    expect(next.latestRunSession).toMatchObject({
+      id: "run-2",
+      status: "testing",
+      agentProfile: "builder",
+      updatedAt: 10,
+    });
   });
 });

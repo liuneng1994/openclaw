@@ -7,6 +7,11 @@ import {
   type TaskIntent,
 } from "./protocol.js";
 import {
+  getLatestRunSessionId,
+  getLatestRunSnapshot,
+  updateTaskLatestRunSnapshot,
+} from "./state.js";
+import {
   deriveTaskTitle,
   isResumableTaskStatus,
   resolveAgentProfileForTaskKind,
@@ -79,13 +84,14 @@ function cloneTask(task: TaskRecord): TaskRecord {
 }
 
 function buildRunSnapshotLines(task: TaskRecord): string[] {
-  if (!task.latestRunSession) {
+  const run = getLatestRunSnapshot(task);
+  if (!run) {
     return [];
   }
   return [
-    `Run Session ID: ${task.latestRunSession.id}`,
-    `Run Session Status: ${task.latestRunSession.status}`,
-    `Run Agent Profile: ${task.latestRunSession.agentProfile}`,
+    `Run Session ID: ${run.id}`,
+    `Run Session Status: ${run.status}`,
+    `Run Agent Profile: ${run.agentProfile}`,
   ];
 }
 
@@ -167,7 +173,9 @@ function buildApprovalConfirmPrompt(
     `Approval Summary: ${approval.summary}`,
     `Approval Resolution: ${resolution}`,
     approval.runSessionId ? `Pending Run Session ID: ${approval.runSessionId}` : undefined,
-    task.latestRunSession?.id ? `Resolved Run Session ID: ${task.latestRunSession.id}` : undefined,
+    getLatestRunSnapshot(task)?.id
+      ? `Resolved Run Session ID: ${getLatestRunSnapshot(task)?.id}`
+      : undefined,
     "Instruction: Resume the task and continue past the previously blocked action. The user has confirmed execution for this pending approval.",
     "Original user message: 确认执行",
   ]
@@ -241,10 +249,7 @@ function matchesApprovalRun(task: TaskRecord, approval: TaskPendingApproval): bo
   if (!approval.runSessionId) {
     return true;
   }
-  return (
-    task.latestRunSessionId === approval.runSessionId ||
-    task.latestRunSession?.id === approval.runSessionId
-  );
+  return getLatestRunSessionId(task) === approval.runSessionId;
 }
 
 function isTerminalTaskStatus(status: TaskRecord["status"] | undefined): boolean {
@@ -561,19 +566,13 @@ export function updateTaskRouterRunProgress(input: {
     if (task.id !== input.taskId) {
       return task;
     }
-    return {
-      ...task,
-      status: input.taskStatus ?? task.status,
-      updatedAt: now,
-      latestRunSessionId: input.runSessionId ?? task.latestRunSessionId,
-      latestRunSession: {
-        id: input.runSessionId ?? task.latestRunSession?.id ?? task.latestRunSessionId ?? task.id,
-        status: input.runStatus,
-        agentProfile:
-          task.latestRunSession?.agentProfile ?? resolveAgentProfileForTaskKind(task.kind),
-        updatedAt: now,
-      },
-    };
+    return updateTaskLatestRunSnapshot({
+      task,
+      runSessionId: input.runSessionId,
+      runStatus: input.runStatus,
+      taskStatus: input.taskStatus,
+      now,
+    });
   };
 
   const latestTask = snapshot.latestTask ? updateTask(snapshot.latestTask) : undefined;

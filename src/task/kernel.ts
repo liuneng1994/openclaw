@@ -7,6 +7,7 @@ import {
   type ExecutionEvent,
 } from "./protocol.js";
 import type { TaskRouterDecision } from "./router.js";
+import { getLatestRunSessionId, getLatestRunSnapshot } from "./state.js";
 import type { TaskRecord } from "./types.js";
 
 export const EXECUTION_POLICY_MODES = ["readonly", "ask", "auto"] as const;
@@ -206,8 +207,8 @@ function buildExecutionKernelPrompt(params: {
     params.command.agentProfile ? `Agent Profile: ${params.command.agentProfile}` : undefined,
     params.command.correlationId ? `Correlation ID: ${params.command.correlationId}` : undefined,
     params.task?.status ? `Task Status Snapshot: ${params.task.status}` : undefined,
-    params.task?.latestRunSession?.status
-      ? `Run Status Snapshot: ${params.task.latestRunSession.status}`
+    getLatestRunSnapshot(params.task)?.status
+      ? `Run Status Snapshot: ${getLatestRunSnapshot(params.task)?.status}`
       : undefined,
     params.policy ? `Execution Policy Mode: ${params.policy.mode}` : undefined,
     params.policy ? `Execution Policy Risk: ${params.policy.risk}` : undefined,
@@ -265,14 +266,14 @@ export function resolveExecutionKernelPlan(input: {
   }
 
   const goal = task.title || input.decision.taskIntent.text;
-  const runSessionId = task.latestRunSessionId ?? task.latestRunSession?.id;
+  const runSessionId = getLatestRunSessionId(task);
   const command = createExecutionCommand({
     type: commandType,
     taskId: task.id,
     conversationId: task.conversationId,
     goal,
     runSessionId,
-    agentProfile: task.latestRunSession?.agentProfile,
+    agentProfile: getLatestRunSnapshot(task)?.agentProfile,
     correlationId: `exec:${task.id}:${runSessionId ?? "pending"}`,
   });
 
@@ -284,7 +285,7 @@ export function resolveExecutionKernelPlan(input: {
         taskId: task.id,
         runSessionId: runSessionId ?? task.id,
         conversationId: task.conversationId,
-        status: task.latestRunSession?.status ?? "planning",
+        status: getLatestRunSnapshot(task)?.status ?? "planning",
         correlationId: command.correlationId,
         message:
           commandType === "resume_session"
@@ -299,7 +300,7 @@ export function resolveExecutionKernelPlan(input: {
         taskId: task.id,
         runSessionId: runSessionId ?? task.id,
         conversationId: task.conversationId,
-        status: task.latestRunSession?.status ?? "summarizing",
+        status: getLatestRunSnapshot(task)?.status ?? "summarizing",
         correlationId: command.correlationId,
         message: "user requested a task summary",
       }),
@@ -311,7 +312,7 @@ export function resolveExecutionKernelPlan(input: {
         taskId: task.id,
         runSessionId: runSessionId ?? task.id,
         conversationId: task.conversationId,
-        status: task.latestRunSession?.status,
+        status: getLatestRunSnapshot(task)?.status,
         correlationId: command.correlationId,
         message: "downgrade task execution to readonly",
       }),
