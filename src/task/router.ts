@@ -190,6 +190,20 @@ function matchesApprovalRun(task: TaskRecord, approval: TaskPendingApproval): bo
   );
 }
 
+function isTerminalTaskStatus(status: TaskRecord["status"] | undefined): boolean {
+  return status === "completed" || status === "failed" || status === "cancelled";
+}
+
+function shouldClearApprovalForTask(
+  approval: TaskPendingApproval | undefined,
+  task: TaskRecord | undefined,
+): boolean {
+  if (!approval?.taskId || !task || approval.taskId !== task.id) {
+    return false;
+  }
+  return isTerminalTaskStatus(task.status);
+}
+
 function resolvePendingApprovalTask(
   snapshot: TaskRouterSnapshot,
   approval: TaskPendingApproval | undefined,
@@ -253,10 +267,25 @@ export function resolveTaskRouterDecision(input: {
   let latestTask = snapshot.latestTask;
   let recentTasks = snapshot.recentTasks ?? [];
   let pendingApproval = snapshot.pendingApproval;
+  if (shouldClearApprovalForTask(pendingApproval, latestTask)) {
+    pendingApproval = undefined;
+  }
   let rewrittenText = input.text;
   let matchedExistingTask = false;
   let pendingApprovalResolution: PendingApprovalResolution | undefined;
-  const resumableTask = findLatestResumableTask(snapshot);
+  const resumableTask = findLatestResumableTask({
+    latestTask,
+    recentTasks,
+    pendingApproval,
+  });
+
+  if (
+    pendingApproval?.status === "resuming" &&
+    controlAction?.type !== "confirm_execution" &&
+    controlAction?.type !== "reject_execution"
+  ) {
+    pendingApproval = undefined;
+  }
 
   if (controlAction?.type === "confirm_execution" && pendingApproval) {
     pendingApprovalResolution = resolvePendingApprovalTask(snapshot, pendingApproval);
@@ -322,6 +351,9 @@ export function resolveTaskRouterDecision(input: {
       updatedAt: Date.now(),
     };
     recentTasks = updateExistingTaskStatus(recentTasks, latestTask.id, () => latestTask!);
+    if (shouldClearApprovalForTask(pendingApproval, latestTask)) {
+      pendingApproval = undefined;
+    }
   } else if (
     taskIntent.requiresExecution &&
     taskIntent.kind !== "resume_task" &&
@@ -439,9 +471,14 @@ export function updateTaskRouterRunProgress(input: {
 
   const latestTask = snapshot.latestTask ? updateTask(snapshot.latestTask) : undefined;
   const recentTasks = snapshot.recentTasks?.map(updateTask) ?? [];
+  const nextPendingApproval = shouldClearApprovalForTask(snapshot.pendingApproval, latestTask)
+    ? undefined
+    : snapshot.pendingApproval?.status === "resuming" && input.runStatus === "cancelled"
+      ? undefined
+      : snapshot.pendingApproval;
   return withTaskRouterSnapshot(input.entry, {
     latestTask,
     recentTasks,
-    pendingApproval: snapshot.pendingApproval,
+    pendingApproval: nextPendingApproval,
   });
 }

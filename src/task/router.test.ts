@@ -612,6 +612,163 @@ describe("task/router", () => {
     expect(next.taskRouter?.recentTasks?.[0]?.id).toBe("task-1");
   });
 
+  it("clears approval when the bound task reaches a terminal status", () => {
+    const next = updateTaskRouterRunProgress({
+      entry: {
+        sessionId: "session-1",
+        updatedAt: 1,
+        taskRouter: {
+          latestTask: {
+            id: "task-1",
+            kind: "run_tests",
+            status: "running",
+            title: "run tests",
+            conversationId: "telegram:1",
+            createdAt: 1,
+            updatedAt: 2,
+          },
+          recentTasks: [],
+          pendingApproval: {
+            kind: "git",
+            status: "pending",
+            taskId: "task-1",
+            runSessionId: "run-1",
+            summary: "git commit",
+            createdAt: 3,
+          },
+        },
+      },
+      taskId: "task-1",
+      runSessionId: "run-2",
+      runStatus: "completed",
+      taskStatus: "completed",
+    });
+
+    expect(next?.taskRouter?.pendingApproval).toBeUndefined();
+  });
+
+  it("clears resuming approval when the resumed run is cancelled", () => {
+    const next = updateTaskRouterRunProgress({
+      entry: {
+        sessionId: "session-1",
+        updatedAt: 1,
+        taskRouter: {
+          latestTask: {
+            id: "task-1",
+            kind: "modify_code",
+            status: "running",
+            title: "fix router",
+            conversationId: "telegram:1",
+            createdAt: 1,
+            updatedAt: 2,
+          },
+          recentTasks: [],
+          pendingApproval: {
+            kind: "external",
+            status: "resuming",
+            taskId: "task-1",
+            runSessionId: "run-1",
+            summary: "message send",
+            createdAt: 3,
+            resumingAt: 4,
+          },
+        },
+      },
+      taskId: "task-1",
+      runSessionId: "run-1",
+      runStatus: "cancelled",
+      taskStatus: "cancelled",
+    });
+
+    expect(next?.taskRouter?.pendingApproval).toBeUndefined();
+  });
+
+  it("clears stale resuming approval on ordinary continue control", () => {
+    const decision = resolveTaskRouterDecision({
+      text: "继续",
+      conversationId: "telegram:1",
+      sessionEntry: {
+        sessionId: "session-1",
+        updatedAt: 1,
+        taskRouter: {
+          latestTask: {
+            id: "task-1",
+            kind: "modify_code",
+            status: "waiting_user",
+            title: "fix router",
+            conversationId: "telegram:1",
+            createdAt: 1,
+            updatedAt: 2,
+            latestRunSessionId: "run-1",
+            latestRunSession: {
+              id: "run-1",
+              status: "paused",
+              agentProfile: "builder",
+              updatedAt: 2,
+            },
+          },
+          recentTasks: [],
+          pendingApproval: {
+            kind: "git",
+            status: "resuming",
+            taskId: "task-1",
+            runSessionId: "run-1",
+            summary: "git commit",
+            createdAt: 3,
+            resumingAt: 4,
+          },
+        },
+      },
+    });
+
+    expect(decision.controlAction?.type).toBe("continue");
+    expect(decision.snapshot.pendingApproval).toBeUndefined();
+    expect(decision.snapshot.latestTask?.status).toBe("running");
+  });
+
+  it("clears stale resuming approval on summary control", () => {
+    const decision = resolveTaskRouterDecision({
+      text: "总结一下",
+      conversationId: "telegram:1",
+      sessionEntry: {
+        sessionId: "session-1",
+        updatedAt: 1,
+        taskRouter: {
+          latestTask: {
+            id: "task-1",
+            kind: "modify_code",
+            status: "waiting_user",
+            title: "fix router",
+            conversationId: "telegram:1",
+            createdAt: 1,
+            updatedAt: 2,
+            latestRunSessionId: "run-1",
+            latestRunSession: {
+              id: "run-1",
+              status: "paused",
+              agentProfile: "builder",
+              updatedAt: 2,
+            },
+          },
+          recentTasks: [],
+          pendingApproval: {
+            kind: "git",
+            status: "resuming",
+            taskId: "task-1",
+            runSessionId: "run-1",
+            summary: "git commit",
+            createdAt: 3,
+            resumingAt: 4,
+          },
+        },
+      },
+    });
+
+    expect(decision.controlAction?.type).toBe("request_summary");
+    expect(decision.snapshot.pendingApproval).toBeUndefined();
+    expect(decision.rewrittenText).toContain("Summarize the current task state");
+  });
+
   it("preserves pending approval while updating run progress", () => {
     const next = updateTaskRouterRunProgress({
       entry: {

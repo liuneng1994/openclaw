@@ -131,6 +131,9 @@ Consumption rules:
 - a resumed run that no longer emits a fresh `pendingApproval` clears the old approval as consumed
 - a new execution-bearing task clears any older approval state so stale approvals cannot drift onto a new task
 - a rejection clears the approval immediately
+- terminal task states (`completed`, `failed`, `cancelled`) clear any approval bound to that task
+- a `resuming` approval interrupted by cancellation is cleared instead of falling back to reusable state
+- ordinary `continue` / `request_summary` control turns do not consume or revive stale approval state
 
 #### Gate trips
 
