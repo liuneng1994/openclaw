@@ -116,11 +116,32 @@ describe("task/kernel", () => {
             },
           },
           recentTasks: [],
-          pendingApproval: {
+        },
+        pendingApprovalResolution: {
+          approval: {
             kind: "git",
+            taskId: "task-1",
+            runSessionId: "run-1",
             summary: 'git commit -m "x"',
             createdAt: 3,
           },
+          task: {
+            id: "task-1",
+            kind: "modify_code",
+            status: "waiting_user",
+            title: "fix router",
+            conversationId: "telegram:1",
+            createdAt: 1,
+            updatedAt: 2,
+            latestRunSessionId: "run-1",
+            latestRunSession: {
+              id: "run-1",
+              status: "paused",
+              agentProfile: "builder",
+              updatedAt: 2,
+            },
+          },
+          resolution: "exact",
         },
       }),
       originalPrompt: "[Task Router]\nconfirmed execution",

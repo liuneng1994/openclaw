@@ -16,7 +16,7 @@ import {
 
 const MAX_RECENT_TASKS = 5;
 
-type TaskPendingApproval = {
+export type TaskPendingApproval = {
   kind: "git" | "external";
   taskId?: string;
   runSessionId?: string;
@@ -24,10 +24,16 @@ type TaskPendingApproval = {
   createdAt: number;
 };
 
-type TaskRouterSnapshot = {
+export type TaskRouterSnapshot = {
   latestTask?: TaskRecord;
   recentTasks?: TaskRecord[];
   pendingApproval?: TaskPendingApproval;
+};
+
+export type PendingApprovalResolution = {
+  approval: TaskPendingApproval;
+  task: TaskRecord;
+  resolution: "exact" | "fallback";
 };
 
 export type TaskRouterDecision = {
@@ -36,6 +42,7 @@ export type TaskRouterDecision = {
   rewrittenText: string;
   snapshot: TaskRouterSnapshot;
   matchedExistingTask: boolean;
+  pendingApprovalResolution?: PendingApprovalResolution;
 };
 
 function createTaskId(conversationId: string, text: string): string {
@@ -105,7 +112,11 @@ function buildTaskListPrompt(tasks: TaskRecord[]): string {
   ].join("\n");
 }
 
-function buildApprovalConfirmPrompt(task: TaskRecord, approval: TaskPendingApproval): string {
+function buildApprovalConfirmPrompt(
+  task: TaskRecord,
+  approval: TaskPendingApproval,
+  resolution: PendingApprovalResolution["resolution"],
+): string {
   return [
     "[Task Router]",
     "The user explicitly confirmed a previously blocked high-risk action.",
@@ -113,7 +124,9 @@ function buildApprovalConfirmPrompt(task: TaskRecord, approval: TaskPendingAppro
     `Task Title: ${task.title}`,
     `Approval Kind: ${approval.kind}`,
     `Approval Summary: ${approval.summary}`,
-    approval.runSessionId ? `Run Session ID: ${approval.runSessionId}` : undefined,
+    `Approval Resolution: ${resolution}`,
+    approval.runSessionId ? `Pending Run Session ID: ${approval.runSessionId}` : undefined,
+    task.latestRunSession?.id ? `Resolved Run Session ID: ${task.latestRunSession.id}` : undefined,
     "Instruction: Resume the task and continue past the previously blocked action. The user has confirmed execution for this pending approval.",
     "Original user message: 确认执行",
   ]
@@ -152,6 +165,66 @@ function findLatestResumableTask(snapshot: TaskRouterSnapshot): TaskRecord | und
   return snapshot.recentTasks?.find((task) => isResumableTaskStatus(task.status));
 }
 
+function findTaskById(
+  snapshot: TaskRouterSnapshot,
+  taskId: string | undefined,
+): TaskRecord | undefined {
+  if (!taskId) {
+    return undefined;
+  }
+  if (snapshot.latestTask?.id === taskId) {
+    return snapshot.latestTask;
+  }
+  return snapshot.recentTasks?.find((task) => task.id === taskId);
+}
+
+function matchesApprovalRun(task: TaskRecord, approval: TaskPendingApproval): boolean {
+  if (!approval.runSessionId) {
+    return true;
+  }
+  return (
+    task.latestRunSessionId === approval.runSessionId ||
+    task.latestRunSession?.id === approval.runSessionId
+  );
+}
+
+function resolvePendingApprovalTask(
+  snapshot: TaskRouterSnapshot,
+  approval: TaskPendingApproval | undefined,
+): PendingApprovalResolution | undefined {
+  if (!approval?.taskId) {
+    return undefined;
+  }
+
+  const exactTask = findTaskById(snapshot, approval.taskId);
+  if (
+    exactTask &&
+    isResumableTaskStatus(exactTask.status) &&
+    matchesApprovalRun(exactTask, approval)
+  ) {
+    return {
+      approval,
+      task: exactTask,
+      resolution: "exact",
+    };
+  }
+
+  const resumableTask = findLatestResumableTask(snapshot);
+  if (
+    resumableTask &&
+    resumableTask.id === approval.taskId &&
+    isResumableTaskStatus(resumableTask.status)
+  ) {
+    return {
+      approval,
+      task: resumableTask,
+      resolution: "fallback",
+    };
+  }
+
+  return undefined;
+}
+
 function withTaskRouterSnapshot(
   entry: SessionEntry | undefined,
   snapshot: TaskRouterSnapshot,
@@ -180,18 +253,26 @@ export function resolveTaskRouterDecision(input: {
   let pendingApproval = snapshot.pendingApproval;
   let rewrittenText = input.text;
   let matchedExistingTask = false;
+  let pendingApprovalResolution: PendingApprovalResolution | undefined;
   const resumableTask = findLatestResumableTask(snapshot);
 
-  if (controlAction?.type === "confirm_execution" && pendingApproval && resumableTask) {
-    latestTask = {
-      ...resumableTask,
-      status: "running",
-      updatedAt: Date.now(),
-    };
-    recentTasks = upsertRecentTasks(recentTasks, latestTask);
-    rewrittenText = buildApprovalConfirmPrompt(latestTask, pendingApproval);
-    pendingApproval = undefined;
-    matchedExistingTask = true;
+  if (controlAction?.type === "confirm_execution" && pendingApproval) {
+    pendingApprovalResolution = resolvePendingApprovalTask(snapshot, pendingApproval);
+    if (pendingApprovalResolution) {
+      latestTask = {
+        ...pendingApprovalResolution.task,
+        status: "running",
+        updatedAt: Date.now(),
+      };
+      recentTasks = upsertRecentTasks(recentTasks, latestTask);
+      rewrittenText = buildApprovalConfirmPrompt(
+        latestTask,
+        pendingApprovalResolution.approval,
+        pendingApprovalResolution.resolution,
+      );
+      pendingApproval = undefined;
+      matchedExistingTask = true;
+    }
   } else if (controlAction?.type === "reject_execution" && pendingApproval && latestTask) {
     latestTask = {
       ...latestTask,
@@ -273,6 +354,7 @@ export function resolveTaskRouterDecision(input: {
       pendingApproval,
     },
     matchedExistingTask,
+    pendingApprovalResolution,
   };
 }
 
@@ -350,5 +432,9 @@ export function updateTaskRouterRunProgress(input: {
 
   const latestTask = snapshot.latestTask ? updateTask(snapshot.latestTask) : undefined;
   const recentTasks = snapshot.recentTasks?.map(updateTask) ?? [];
-  return withTaskRouterSnapshot(input.entry, { latestTask, recentTasks });
+  return withTaskRouterSnapshot(input.entry, {
+    latestTask,
+    recentTasks,
+    pendingApproval: snapshot.pendingApproval,
+  });
 }

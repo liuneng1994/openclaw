@@ -441,11 +441,12 @@ export async function runPreparedReply(
     originalPrompt: taskRouterDecision.rewrittenText,
   });
   const resolvedExecutionPolicy: ExecutionPolicy | undefined =
-    taskRouterDecision.controlAction?.type === "confirm_execution" && sessionPendingApproval
+    taskRouterDecision.controlAction?.type === "confirm_execution" &&
+    taskRouterDecision.pendingApprovalResolution
       ? {
           mode: "ask",
           risk: "high",
-          writeIntent: sessionPendingApproval.kind,
+          writeIntent: taskRouterDecision.pendingApprovalResolution.approval.kind,
           requiresConfirmation: false,
         }
       : executionKernelPlan.policy;
@@ -524,6 +525,16 @@ export async function runPreparedReply(
     typing.cleanup();
     return {
       text: `好的，已先不执行这次${sessionPendingApproval.kind === "git" ? "git 变更" : "外部动作"}。当前任务保持等待您下一步指令。`,
+    };
+  }
+  if (
+    controlAction?.type === "confirm_execution" &&
+    sessionPendingApproval &&
+    !taskRouterDecision.pendingApprovalResolution
+  ) {
+    typing.cleanup();
+    return {
+      text: "这次待确认动作的上下文已经变化，Master。我先没有继续执行；请重新下达执行指令，我会按当前状态重新评估并在需要时再次请求确认。",
     };
   }
   const latestTask = activeTaskRun.latestTask;

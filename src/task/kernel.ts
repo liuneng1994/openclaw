@@ -50,7 +50,7 @@ function resolveExecutionPolicy(params: {
   }
 
   if (params.decision.controlAction?.type === "confirm_execution") {
-    const approvalKind = params.decision.snapshot.pendingApproval?.kind;
+    const approvalKind = params.decision.pendingApprovalResolution?.approval.kind;
     return {
       mode: "ask",
       risk: "high",

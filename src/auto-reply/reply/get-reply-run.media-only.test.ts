@@ -327,6 +327,114 @@ describe("runPreparedReply media-only handling", () => {
     });
   });
 
+  it("uses fallback approval resolution when the task matches but run session drifted", async () => {
+    await runPreparedReply(
+      baseParams({
+        ctx: {
+          Body: "确认执行",
+          RawBody: "确认执行",
+          CommandBody: "确认执行",
+          ThreadHistoryBody: "",
+          OriginatingChannel: "slack",
+          OriginatingTo: "C123",
+          ChatType: "group",
+        },
+        sessionCtx: {
+          Body: "确认执行",
+          BodyStripped: "确认执行",
+          ThreadHistoryBody: "",
+          Provider: "slack",
+          ChatType: "group",
+          OriginatingChannel: "slack",
+          OriginatingTo: "C123",
+        },
+        sessionEntry: {
+          taskRouter: {
+            latestTask: {
+              id: "task-1",
+              kind: "modify_code",
+              status: "waiting_user",
+              title: "fix router",
+              conversationId: "session-key",
+              createdAt: 1,
+              updatedAt: 4,
+              latestRunSessionId: "run-2",
+              latestRunSession: {
+                id: "run-2",
+                status: "paused",
+                agentProfile: "builder",
+                updatedAt: 4,
+              },
+            },
+            recentTasks: [],
+            pendingApproval: {
+              kind: "git",
+              taskId: "task-1",
+              runSessionId: "run-1",
+              summary: 'git commit -m "x"',
+              createdAt: 3,
+            },
+          },
+        } as never,
+      }),
+    );
+
+    const call = vi.mocked(runReplyAgent).mock.calls[0]?.[0];
+    expect(call?.commandBody).toContain("Approval Resolution: fallback");
+    expect(call?.commandBody).toContain("Resolved Run Session ID: run-2");
+  });
+
+  it("refuses to resume when the pending approval no longer matches a resumable task", async () => {
+    const result = await runPreparedReply(
+      baseParams({
+        ctx: {
+          Body: "确认执行",
+          RawBody: "确认执行",
+          CommandBody: "确认执行",
+          ThreadHistoryBody: "",
+          OriginatingChannel: "slack",
+          OriginatingTo: "C123",
+          ChatType: "group",
+        },
+        sessionCtx: {
+          Body: "确认执行",
+          BodyStripped: "确认执行",
+          ThreadHistoryBody: "",
+          Provider: "slack",
+          ChatType: "group",
+          OriginatingChannel: "slack",
+          OriginatingTo: "C123",
+        },
+        sessionEntry: {
+          taskRouter: {
+            latestTask: {
+              id: "task-2",
+              kind: "modify_code",
+              status: "waiting_user",
+              title: "other task",
+              conversationId: "session-key",
+              createdAt: 1,
+              updatedAt: 4,
+            },
+            recentTasks: [],
+            pendingApproval: {
+              kind: "external",
+              taskId: "task-1",
+              runSessionId: "run-1",
+              summary: "message send",
+              createdAt: 3,
+            },
+          },
+        } as never,
+      }),
+    );
+
+    expect(result).toEqual({
+      text: "这次待确认动作的上下文已经变化，Master。我先没有继续执行；请重新下达执行指令，我会按当前状态重新评估并在需要时再次请求确认。",
+    });
+    expect(vi.mocked(runReplyAgent)).toHaveBeenCalledTimes(0);
+  });
+
   it("acknowledges approval rejection without starting a run", async () => {
     const result = await runPreparedReply(
       baseParams({

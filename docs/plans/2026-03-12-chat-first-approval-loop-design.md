@@ -95,6 +95,23 @@ These phrases should only be interpreted as approval controls when a `pendingApp
 
 ### 4. Control flow
 
+#### Confirmation binding mode (follow-up tightening)
+
+Use a balanced, session-local binding strategy for `confirm_execution`:
+
+1. First try an **exact match** on:
+   - `pendingApproval.taskId`
+   - `pendingApproval.runSessionId`
+   - `pendingApproval.kind`
+2. If the run session drifted, allow a **conservative fallback** only when:
+   - the same `taskId` is still the latest resumable task
+   - the approval `kind` is unchanged
+3. If the task context no longer matches, do **not** resume.
+   - keep or re-surface the pending approval state
+   - tell the user to re-issue the execution request so the system can re-evaluate current state
+
+This keeps the loop smooth for ordinary run-state drift without allowing approvals to float onto unrelated tasks.
+
 #### Gate trips
 
 - runtime blocks the risky action

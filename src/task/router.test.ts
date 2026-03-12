@@ -284,6 +284,93 @@ describe("task/router", () => {
     expect(decision.rewrittenText).toContain("Approval Kind: git");
   });
 
+  it("falls back to the latest resumable task when approval run session drifted", () => {
+    const entry: SessionEntry = {
+      sessionId: "session-1",
+      updatedAt: 1,
+      taskRouter: {
+        latestTask: {
+          id: "task-1",
+          kind: "modify_code",
+          status: "waiting_user",
+          title: "fix router",
+          conversationId: "telegram:1",
+          createdAt: 1,
+          updatedAt: 4,
+          latestRunSessionId: "run-2",
+          latestRunSession: {
+            id: "run-2",
+            status: "paused",
+            agentProfile: "builder",
+            updatedAt: 4,
+          },
+        },
+        recentTasks: [],
+        pendingApproval: {
+          kind: "git",
+          taskId: "task-1",
+          runSessionId: "run-1",
+          summary: 'git commit -m "x"',
+          createdAt: 3,
+        },
+      },
+    };
+
+    const decision = resolveTaskRouterDecision({
+      text: "执行吧",
+      conversationId: "telegram:1",
+      sessionEntry: entry,
+    });
+
+    expect(decision.controlAction?.type).toBe("confirm_execution");
+    expect(decision.matchedExistingTask).toBe(true);
+    expect(decision.pendingApprovalResolution?.resolution).toBe("fallback");
+    expect(decision.snapshot.pendingApproval).toBeUndefined();
+    expect(decision.rewrittenText).toContain("Approval Resolution: fallback");
+    expect(decision.rewrittenText).toContain("Resolved Run Session ID: run-2");
+  });
+
+  it("keeps pending approval when confirmation no longer matches a resumable task", () => {
+    const entry: SessionEntry = {
+      sessionId: "session-1",
+      updatedAt: 1,
+      taskRouter: {
+        latestTask: {
+          id: "task-2",
+          kind: "modify_code",
+          status: "waiting_user",
+          title: "other task",
+          conversationId: "telegram:1",
+          createdAt: 1,
+          updatedAt: 4,
+        },
+        recentTasks: [],
+        pendingApproval: {
+          kind: "external",
+          taskId: "task-1",
+          runSessionId: "run-1",
+          summary: "message send",
+          createdAt: 3,
+        },
+      },
+    };
+
+    const decision = resolveTaskRouterDecision({
+      text: "确认执行",
+      conversationId: "telegram:1",
+      sessionEntry: entry,
+    });
+
+    expect(decision.controlAction?.type).toBe("confirm_execution");
+    expect(decision.matchedExistingTask).toBe(false);
+    expect(decision.pendingApprovalResolution).toBeUndefined();
+    expect(decision.snapshot.pendingApproval).toMatchObject({
+      kind: "external",
+      taskId: "task-1",
+    });
+    expect(decision.rewrittenText).toBe("确认执行");
+  });
+
   it("clears pending approval on rejection", () => {
     const entry = updateTaskRouterPendingApproval({
       entry: {
@@ -432,6 +519,44 @@ describe("task/router", () => {
 
     expect(next.taskRouter?.latestTask?.id).toBe("task-1");
     expect(next.taskRouter?.recentTasks?.[0]?.id).toBe("task-1");
+  });
+
+  it("preserves pending approval while updating run progress", () => {
+    const next = updateTaskRouterRunProgress({
+      entry: {
+        sessionId: "session-1",
+        updatedAt: 1,
+        taskRouter: {
+          latestTask: {
+            id: "task-1",
+            kind: "run_tests",
+            status: "running",
+            title: "run tests",
+            conversationId: "telegram:1",
+            createdAt: 1,
+            updatedAt: 2,
+          },
+          recentTasks: [],
+          pendingApproval: {
+            kind: "git",
+            taskId: "task-1",
+            runSessionId: "run-1",
+            summary: "git commit",
+            createdAt: 3,
+          },
+        },
+      },
+      taskId: "task-1",
+      runSessionId: "run-2",
+      runStatus: "testing",
+      taskStatus: "running",
+    });
+
+    expect(next?.taskRouter?.pendingApproval).toMatchObject({
+      kind: "git",
+      taskId: "task-1",
+      runSessionId: "run-1",
+    });
   });
 
   it("updates run progress for the tracked latest task", () => {
