@@ -6,6 +6,7 @@ export type EmbeddedPiPendingApproval = {
   summary: string;
   taskId?: string;
   runSessionId?: string;
+  status?: "pending";
 };
 
 export type EmbeddedPiAgentMeta = {

@@ -687,6 +687,7 @@ export function resolveExecutionPolicyPendingApproval(params: {
   if (policy.writeIntent === "external" && EXTERNAL_CONFIRMATION_TOOL_NAMES.has(toolName)) {
     return {
       kind: "external",
+      status: "pending",
       summary: `external action via ${toolName}`,
     };
   }
@@ -697,6 +698,7 @@ export function resolveExecutionPolicyPendingApproval(params: {
     if (isGitMutationCommand(command)) {
       return {
         kind: "git",
+        status: "pending",
         summary: command.trim() || "git mutation",
       };
     }

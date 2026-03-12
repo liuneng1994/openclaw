@@ -307,6 +307,7 @@ describe("runPreparedReply media-only handling", () => {
             recentTasks: [],
             pendingApproval: {
               kind: "git",
+              status: "pending",
               taskId: "task-1",
               runSessionId: "run-1",
               summary: 'git commit -m "x"',
@@ -325,6 +326,59 @@ describe("runPreparedReply media-only handling", () => {
       writeIntent: "git",
       requiresConfirmation: false,
     });
+  });
+
+  it("does not reuse an approval already marked as resuming", async () => {
+    const result = await runPreparedReply(
+      baseParams({
+        ctx: {
+          Body: "确认执行",
+          RawBody: "确认执行",
+          CommandBody: "确认执行",
+          ThreadHistoryBody: "",
+          OriginatingChannel: "slack",
+          OriginatingTo: "C123",
+          ChatType: "group",
+        },
+        sessionCtx: {
+          Body: "确认执行",
+          BodyStripped: "确认执行",
+          ThreadHistoryBody: "",
+          Provider: "slack",
+          ChatType: "group",
+          OriginatingChannel: "slack",
+          OriginatingTo: "C123",
+        },
+        sessionEntry: {
+          taskRouter: {
+            latestTask: {
+              id: "task-1",
+              kind: "modify_code",
+              status: "waiting_user",
+              title: "fix router",
+              conversationId: "session-key",
+              createdAt: 1,
+              updatedAt: 2,
+            },
+            recentTasks: [],
+            pendingApproval: {
+              kind: "git",
+              status: "resuming",
+              taskId: "task-1",
+              runSessionId: "run-1",
+              summary: 'git commit -m "x"',
+              createdAt: 3,
+              resumingAt: 4,
+            },
+          },
+        } as never,
+      }),
+    );
+
+    expect(result).toEqual({
+      text: "这次确认已在恢复流程中，Master。我不会重复放行；若当前恢复未成功，请重新下达执行指令，我会按最新上下文重新评估。",
+    });
+    expect(vi.mocked(runReplyAgent)).toHaveBeenCalledTimes(0);
   });
 
   it("uses fallback approval resolution when the task matches but run session drifted", async () => {
@@ -369,6 +423,7 @@ describe("runPreparedReply media-only handling", () => {
             recentTasks: [],
             pendingApproval: {
               kind: "git",
+              status: "pending",
               taskId: "task-1",
               runSessionId: "run-1",
               summary: 'git commit -m "x"',
@@ -419,6 +474,7 @@ describe("runPreparedReply media-only handling", () => {
             recentTasks: [],
             pendingApproval: {
               kind: "external",
+              status: "pending",
               taskId: "task-1",
               runSessionId: "run-1",
               summary: "message send",
@@ -470,6 +526,7 @@ describe("runPreparedReply media-only handling", () => {
             recentTasks: [],
             pendingApproval: {
               kind: "external",
+              status: "pending",
               summary: "message send",
               createdAt: 3,
             },

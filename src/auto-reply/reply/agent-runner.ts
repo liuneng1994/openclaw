@@ -263,6 +263,7 @@ export async function runReplyAgent(params: {
   const persistPendingApproval = async (pendingApproval?: {
     kind: "git" | "external";
     summary: string;
+    status?: "pending";
   }) => {
     if (!activeSessionStore || !sessionKey) {
       return;
@@ -270,6 +271,7 @@ export async function runReplyAgent(params: {
     const approvalState = pendingApproval
       ? {
           ...pendingApproval,
+          status: "pending" as const,
           taskId: latestTaskId,
           runSessionId: latestRunSessionId,
           createdAt: Date.now(),

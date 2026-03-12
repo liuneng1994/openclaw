@@ -529,6 +529,15 @@ export async function runPreparedReply(
   }
   if (
     controlAction?.type === "confirm_execution" &&
+    sessionPendingApproval?.status === "resuming"
+  ) {
+    typing.cleanup();
+    return {
+      text: "这次确认已在恢复流程中，Master。我不会重复放行；若当前恢复未成功，请重新下达执行指令，我会按最新上下文重新评估。",
+    };
+  }
+  if (
+    controlAction?.type === "confirm_execution" &&
     sessionPendingApproval &&
     !taskRouterDecision.pendingApprovalResolution
   ) {

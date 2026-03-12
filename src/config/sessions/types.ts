@@ -257,10 +257,12 @@ export type SessionEntry = {
     }>;
     pendingApproval?: {
       kind: "git" | "external";
+      status: "pending" | "resuming";
       taskId?: string;
       runSessionId?: string;
       summary: string;
       createdAt: number;
+      resumingAt?: number;
     };
   };
 };

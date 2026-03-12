@@ -54,10 +54,12 @@ Recommendation: **Option B**.
 Extend `SessionEntry.taskRouter` with a `pendingApproval` object carrying only the minimum state needed to continue or reject the pending risky action:
 
 - `kind: "git" | "external"`
+- `status: "pending" | "resuming"`
 - `taskId`
 - `runSessionId?`
 - `summary`
 - `createdAt`
+- `resumingAt?`
 
 This keeps approval state attached to the conversation/task snapshot rather than creating a new global registry.
 
@@ -112,6 +114,24 @@ Use a balanced, session-local binding strategy for `confirm_execution`:
 
 This keeps the loop smooth for ordinary run-state drift without allowing approvals to float onto unrelated tasks.
 
+#### Approval consumption tightening
+
+Use a minimal two-phase lifecycle:
+
+1. `pending`
+   - runtime gate has blocked a risky action
+   - waiting for user confirmation or rejection
+2. `resuming`
+   - the user has confirmed and the next resumed turn may consume this approval exactly once
+   - repeated confirmation should not re-open or duplicate the same approval
+
+Consumption rules:
+
+- a matched confirmation transitions `pending -> resuming`
+- a resumed run that no longer emits a fresh `pendingApproval` clears the old approval as consumed
+- a new execution-bearing task clears any older approval state so stale approvals cannot drift onto a new task
+- a rejection clears the approval immediately
+
 #### Gate trips
 
 - runtime blocks the risky action
@@ -122,9 +142,10 @@ This keeps the loop smooth for ordinary run-state drift without allowing approva
 #### User confirms
 
 - control path recognizes confirmation phrase
-- clears `pendingApproval`
+- moves `pendingApproval` from `pending` to `resuming`
 - rewrites the turn into an internal resume prompt carrying an approval override for the pending action
 - run resumes with that one approval context
+- once the resumed run is accepted and completes its turn without surfacing a fresh pending approval, the old approval is cleared (consumed)
 
 #### User rejects / holds
 

@@ -262,6 +262,7 @@ describe("task/router", () => {
         recentTasks: [],
         pendingApproval: {
           kind: "git",
+          status: "pending",
           taskId: "task-1",
           runSessionId: "run-1",
           summary: 'git commit -m "x"',
@@ -278,7 +279,12 @@ describe("task/router", () => {
 
     expect(decision.controlAction?.type).toBe("confirm_execution");
     expect(decision.matchedExistingTask).toBe(true);
-    expect(decision.snapshot.pendingApproval).toBeUndefined();
+    expect(decision.snapshot.pendingApproval).toMatchObject({
+      kind: "git",
+      status: "resuming",
+      taskId: "task-1",
+      runSessionId: "run-1",
+    });
     expect(decision.snapshot.latestTask?.status).toBe("running");
     expect(decision.rewrittenText).toContain("previously blocked high-risk action");
     expect(decision.rewrittenText).toContain("Approval Kind: git");
@@ -308,6 +314,7 @@ describe("task/router", () => {
         recentTasks: [],
         pendingApproval: {
           kind: "git",
+          status: "pending",
           taskId: "task-1",
           runSessionId: "run-1",
           summary: 'git commit -m "x"',
@@ -325,7 +332,12 @@ describe("task/router", () => {
     expect(decision.controlAction?.type).toBe("confirm_execution");
     expect(decision.matchedExistingTask).toBe(true);
     expect(decision.pendingApprovalResolution?.resolution).toBe("fallback");
-    expect(decision.snapshot.pendingApproval).toBeUndefined();
+    expect(decision.snapshot.pendingApproval).toMatchObject({
+      kind: "git",
+      status: "resuming",
+      taskId: "task-1",
+      runSessionId: "run-1",
+    });
     expect(decision.rewrittenText).toContain("Approval Resolution: fallback");
     expect(decision.rewrittenText).toContain("Resolved Run Session ID: run-2");
   });
@@ -347,6 +359,7 @@ describe("task/router", () => {
         recentTasks: [],
         pendingApproval: {
           kind: "external",
+          status: "pending",
           taskId: "task-1",
           runSessionId: "run-1",
           summary: "message send",
@@ -369,6 +382,48 @@ describe("task/router", () => {
       taskId: "task-1",
     });
     expect(decision.rewrittenText).toBe("确认执行");
+  });
+
+  it("does not reuse an approval already marked as resuming", () => {
+    const entry: SessionEntry = {
+      sessionId: "session-1",
+      updatedAt: 1,
+      taskRouter: {
+        latestTask: {
+          id: "task-1",
+          kind: "modify_code",
+          status: "waiting_user",
+          title: "fix router",
+          conversationId: "telegram:1",
+          createdAt: 1,
+          updatedAt: 2,
+        },
+        recentTasks: [],
+        pendingApproval: {
+          kind: "git",
+          status: "resuming",
+          taskId: "task-1",
+          runSessionId: "run-1",
+          summary: 'git commit -m "x"',
+          createdAt: 3,
+          resumingAt: 4,
+        },
+      },
+    };
+
+    const decision = resolveTaskRouterDecision({
+      text: "确认执行",
+      conversationId: "telegram:1",
+      sessionEntry: entry,
+    });
+
+    expect(decision.controlAction?.type).toBe("confirm_execution");
+    expect(decision.matchedExistingTask).toBe(false);
+    expect(decision.pendingApprovalResolution).toBeUndefined();
+    expect(decision.snapshot.pendingApproval).toMatchObject({
+      kind: "git",
+      status: "resuming",
+    });
   });
 
   it("clears pending approval on rejection", () => {
@@ -405,6 +460,42 @@ describe("task/router", () => {
     expect(decision.controlAction?.type).toBe("reject_execution");
     expect(decision.snapshot.pendingApproval).toBeUndefined();
     expect(decision.snapshot.latestTask?.status).toBe("waiting_user");
+  });
+
+  it("clears stale approval when a new execution-bearing task starts", () => {
+    const entry: SessionEntry = {
+      sessionId: "session-1",
+      updatedAt: 1,
+      taskRouter: {
+        latestTask: {
+          id: "task-1",
+          kind: "modify_code",
+          status: "waiting_user",
+          title: "fix router",
+          conversationId: "telegram:1",
+          createdAt: 1,
+          updatedAt: 2,
+        },
+        recentTasks: [],
+        pendingApproval: {
+          kind: "git",
+          status: "pending",
+          taskId: "task-1",
+          runSessionId: "run-1",
+          summary: "git commit",
+          createdAt: 3,
+        },
+      },
+    };
+
+    const decision = resolveTaskRouterDecision({
+      text: "run tests",
+      conversationId: "telegram:1",
+      sessionEntry: entry,
+    });
+
+    expect(decision.snapshot.latestTask?.kind).toBe("run_tests");
+    expect(decision.snapshot.pendingApproval).toBeUndefined();
   });
 
   it("falls back cleanly when continue has no matching task", () => {
@@ -539,6 +630,7 @@ describe("task/router", () => {
           recentTasks: [],
           pendingApproval: {
             kind: "git",
+            status: "pending",
             taskId: "task-1",
             runSessionId: "run-1",
             summary: "git commit",
@@ -554,6 +646,7 @@ describe("task/router", () => {
 
     expect(next?.taskRouter?.pendingApproval).toMatchObject({
       kind: "git",
+      status: "pending",
       taskId: "task-1",
       runSessionId: "run-1",
     });

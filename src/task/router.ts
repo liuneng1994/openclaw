@@ -18,10 +18,12 @@ const MAX_RECENT_TASKS = 5;
 
 export type TaskPendingApproval = {
   kind: "git" | "external";
+  status: "pending" | "resuming";
   taskId?: string;
   runSessionId?: string;
   summary: string;
   createdAt: number;
+  resumingAt?: number;
 };
 
 export type TaskRouterSnapshot = {
@@ -192,7 +194,7 @@ function resolvePendingApprovalTask(
   snapshot: TaskRouterSnapshot,
   approval: TaskPendingApproval | undefined,
 ): PendingApprovalResolution | undefined {
-  if (!approval?.taskId) {
+  if (!approval?.taskId || approval.status !== "pending") {
     return undefined;
   }
 
@@ -270,7 +272,11 @@ export function resolveTaskRouterDecision(input: {
         pendingApprovalResolution.approval,
         pendingApprovalResolution.resolution,
       );
-      pendingApproval = undefined;
+      pendingApproval = {
+        ...pendingApprovalResolution.approval,
+        status: "resuming",
+        resumingAt: Date.now(),
+      };
       matchedExistingTask = true;
     }
   } else if (controlAction?.type === "reject_execution" && pendingApproval && latestTask) {
@@ -321,6 +327,7 @@ export function resolveTaskRouterDecision(input: {
     taskIntent.kind !== "resume_task" &&
     taskIntent.kind !== "cancel_task"
   ) {
+    pendingApproval = undefined;
     const taskId = createTaskId(input.conversationId, input.text);
     const runSessionId = createRunSessionId(taskId);
     const now = Date.now();

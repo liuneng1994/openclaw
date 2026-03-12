@@ -120,6 +120,7 @@ describe("task/kernel", () => {
         pendingApprovalResolution: {
           approval: {
             kind: "git",
+            status: "pending",
             taskId: "task-1",
             runSessionId: "run-1",
             summary: 'git commit -m "x"',
