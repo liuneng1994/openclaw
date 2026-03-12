@@ -382,6 +382,10 @@ describe("task/router", () => {
       kind: "external",
       taskId: "task-1",
     });
+    expect(decision.snapshot.lastApprovalOutcome).toMatchObject({
+      kind: "external",
+      outcome: "context_mismatch",
+    });
     expect(decision.rewrittenText).toBe("确认执行");
   });
 
@@ -421,6 +425,10 @@ describe("task/router", () => {
     expect(decision.controlAction?.type).toBe("confirm_execution");
     expect(decision.pendingApprovalResolution).toBeUndefined();
     expect(decision.snapshot.pendingApproval).toBeUndefined();
+    expect(decision.snapshot.lastApprovalOutcome).toMatchObject({
+      kind: "git",
+      outcome: "expired",
+    });
     vi.useRealTimers();
   });
 
@@ -500,6 +508,10 @@ describe("task/router", () => {
 
     expect(decision.controlAction?.type).toBe("reject_execution");
     expect(decision.snapshot.pendingApproval).toBeUndefined();
+    expect(decision.snapshot.lastApprovalOutcome).toMatchObject({
+      kind: "external",
+      outcome: "rejected",
+    });
     expect(decision.snapshot.latestTask?.status).toBe("waiting_user");
   });
 
@@ -619,6 +631,43 @@ describe("task/router", () => {
     expect(decision.snapshot.latestTask?.status).toBe("running");
   });
 
+  it("records consumed outcome when a resuming approval is cleared after a turn", () => {
+    const next = updateTaskRouterPendingApproval({
+      entry: {
+        sessionId: "session-1",
+        updatedAt: 1,
+        taskRouter: {
+          latestTask: {
+            id: "task-1",
+            kind: "modify_code",
+            status: "running",
+            title: "fix router",
+            conversationId: "telegram:1",
+            createdAt: 1,
+            updatedAt: 2,
+          },
+          recentTasks: [],
+          pendingApproval: {
+            kind: "git",
+            status: "resuming",
+            taskId: "task-1",
+            runSessionId: "run-1",
+            summary: "git commit",
+            createdAt: Date.now(),
+            resumingAt: Date.now(),
+          },
+        },
+      },
+      pendingApproval: undefined,
+    });
+
+    expect(next?.taskRouter?.pendingApproval).toBeUndefined();
+    expect(next?.taskRouter?.lastApprovalOutcome).toMatchObject({
+      kind: "git",
+      outcome: "consumed",
+    });
+  });
+
   it("persists task router snapshots onto session entries", () => {
     const next = applyTaskRouterSnapshot({
       entry: {
@@ -686,6 +735,10 @@ describe("task/router", () => {
     });
 
     expect(next?.taskRouter?.pendingApproval).toBeUndefined();
+    expect(next?.taskRouter?.lastApprovalOutcome).toMatchObject({
+      kind: "git",
+      outcome: "terminal_cleared",
+    });
   });
 
   it("clears resuming approval when the resumed run is cancelled", () => {
@@ -722,6 +775,10 @@ describe("task/router", () => {
     });
 
     expect(next?.taskRouter?.pendingApproval).toBeUndefined();
+    expect(next?.taskRouter?.lastApprovalOutcome).toMatchObject({
+      kind: "external",
+      outcome: "cancelled",
+    });
   });
 
   it("expires stale resuming approval on confirm", () => {
@@ -760,6 +817,10 @@ describe("task/router", () => {
 
     expect(decision.pendingApprovalResolution).toBeUndefined();
     expect(decision.snapshot.pendingApproval).toBeUndefined();
+    expect(decision.snapshot.lastApprovalOutcome).toMatchObject({
+      kind: "git",
+      outcome: "expired",
+    });
     vi.useRealTimers();
   });
 

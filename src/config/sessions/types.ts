@@ -264,6 +264,20 @@ export type SessionEntry = {
       createdAt: number;
       resumingAt?: number;
     };
+    lastApprovalOutcome?: {
+      kind: "git" | "external";
+      taskId?: string;
+      runSessionId?: string;
+      summary?: string;
+      outcome:
+        | "rejected"
+        | "consumed"
+        | "expired"
+        | "context_mismatch"
+        | "cancelled"
+        | "terminal_cleared";
+      updatedAt: number;
+    };
   };
 };
 

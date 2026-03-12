@@ -28,10 +28,26 @@ export type TaskPendingApproval = {
   resumingAt?: number;
 };
 
+export type TaskApprovalOutcome = {
+  kind: "git" | "external";
+  taskId?: string;
+  runSessionId?: string;
+  summary?: string;
+  outcome:
+    | "rejected"
+    | "consumed"
+    | "expired"
+    | "context_mismatch"
+    | "cancelled"
+    | "terminal_cleared";
+  updatedAt: number;
+};
+
 export type TaskRouterSnapshot = {
   latestTask?: TaskRecord;
   recentTasks?: TaskRecord[];
   pendingApproval?: TaskPendingApproval;
+  lastApprovalOutcome?: TaskApprovalOutcome;
 };
 
 export type PendingApprovalResolution = {
@@ -159,6 +175,24 @@ function normalizeSnapshot(snapshot: TaskRouterSnapshot | undefined): TaskRouter
     latestTask: snapshot?.latestTask ? cloneTask(snapshot.latestTask) : undefined,
     recentTasks: snapshot?.recentTasks?.map(cloneTask) ?? [],
     pendingApproval: snapshot?.pendingApproval ? { ...snapshot.pendingApproval } : undefined,
+    lastApprovalOutcome: snapshot?.lastApprovalOutcome
+      ? { ...snapshot.lastApprovalOutcome }
+      : undefined,
+  };
+}
+
+function buildApprovalOutcome(
+  approval: TaskPendingApproval,
+  outcome: TaskApprovalOutcome["outcome"],
+  updatedAt: number,
+): TaskApprovalOutcome {
+  return {
+    kind: approval.kind,
+    taskId: approval.taskId,
+    runSessionId: approval.runSessionId,
+    summary: approval.summary,
+    outcome,
+    updatedAt,
   };
 }
 
@@ -281,10 +315,15 @@ export function resolveTaskRouterDecision(input: {
   let latestTask = snapshot.latestTask;
   let recentTasks = snapshot.recentTasks ?? [];
   let pendingApproval = snapshot.pendingApproval;
+  let lastApprovalOutcome = snapshot.lastApprovalOutcome;
   const expiredApproval = isPendingApprovalExpired(pendingApproval, now)
     ? pendingApproval
     : undefined;
-  if (expiredApproval || shouldClearApprovalForTask(pendingApproval, latestTask)) {
+  if (expiredApproval) {
+    pendingApproval = undefined;
+    lastApprovalOutcome = buildApprovalOutcome(expiredApproval, "expired", now);
+  } else if (shouldClearApprovalForTask(pendingApproval, latestTask)) {
+    lastApprovalOutcome = buildApprovalOutcome(pendingApproval!, "terminal_cleared", now);
     pendingApproval = undefined;
   }
   let rewrittenText = input.text;
@@ -301,6 +340,7 @@ export function resolveTaskRouterDecision(input: {
     controlAction?.type !== "confirm_execution" &&
     controlAction?.type !== "reject_execution"
   ) {
+    lastApprovalOutcome = buildApprovalOutcome(pendingApproval, "expired", now);
     pendingApproval = undefined;
   }
 
@@ -332,6 +372,7 @@ export function resolveTaskRouterDecision(input: {
       updatedAt: now,
     };
     recentTasks = upsertRecentTasks(recentTasks, latestTask);
+    lastApprovalOutcome = buildApprovalOutcome(pendingApproval, "rejected", now);
     pendingApproval = undefined;
     matchedExistingTask = true;
   } else if (controlAction?.type === "continue" && resumableTask) {
@@ -376,6 +417,9 @@ export function resolveTaskRouterDecision(input: {
     taskIntent.kind !== "resume_task" &&
     taskIntent.kind !== "cancel_task"
   ) {
+    if (pendingApproval) {
+      lastApprovalOutcome = buildApprovalOutcome(pendingApproval, "expired", now);
+    }
     pendingApproval = undefined;
     const taskId = createTaskId(input.conversationId, input.text);
     const runSessionId = createRunSessionId(taskId);
@@ -399,6 +443,15 @@ export function resolveTaskRouterDecision(input: {
     recentTasks = upsertRecentTasks(recentTasks, nextTask);
   }
 
+  if (
+    controlAction?.type === "confirm_execution" &&
+    snapshot.pendingApproval?.status === "pending" &&
+    !pendingApprovalResolution &&
+    pendingApproval?.status === "pending"
+  ) {
+    lastApprovalOutcome = buildApprovalOutcome(pendingApproval, "context_mismatch", now);
+  }
+
   return {
     taskIntent,
     controlAction,
@@ -407,6 +460,7 @@ export function resolveTaskRouterDecision(input: {
       latestTask,
       recentTasks,
       pendingApproval,
+      lastApprovalOutcome,
     },
     matchedExistingTask,
     pendingApprovalResolution,
@@ -427,9 +481,15 @@ export function updateTaskRouterPendingApproval(input: {
   if (!input.entry) {
     return undefined;
   }
+  const snapshot = normalizeSnapshot(input.entry.taskRouter);
+  const nextOutcome =
+    snapshot.pendingApproval?.status === "resuming" && !input.pendingApproval
+      ? buildApprovalOutcome(snapshot.pendingApproval, "consumed", Date.now())
+      : snapshot.lastApprovalOutcome;
   return withTaskRouterSnapshot(input.entry, {
-    ...normalizeSnapshot(input.entry.taskRouter),
+    ...snapshot,
     pendingApproval: input.pendingApproval,
+    lastApprovalOutcome: nextOutcome,
   });
 }
 
@@ -487,14 +547,27 @@ export function updateTaskRouterRunProgress(input: {
 
   const latestTask = snapshot.latestTask ? updateTask(snapshot.latestTask) : undefined;
   const recentTasks = snapshot.recentTasks?.map(updateTask) ?? [];
-  const nextPendingApproval = shouldClearApprovalForTask(snapshot.pendingApproval, latestTask)
+  const terminalClearedApproval = shouldClearApprovalForTask(snapshot.pendingApproval, latestTask)
+    ? snapshot.pendingApproval
+    : undefined;
+  const cancelledResumingApproval =
+    snapshot.pendingApproval?.status === "resuming" && input.runStatus === "cancelled"
+      ? snapshot.pendingApproval
+      : undefined;
+  const nextPendingApproval = cancelledResumingApproval
     ? undefined
-    : snapshot.pendingApproval?.status === "resuming" && input.runStatus === "cancelled"
+    : terminalClearedApproval
       ? undefined
       : snapshot.pendingApproval;
+  const nextApprovalOutcome = cancelledResumingApproval
+    ? buildApprovalOutcome(cancelledResumingApproval, "cancelled", now)
+    : terminalClearedApproval
+      ? buildApprovalOutcome(terminalClearedApproval, "terminal_cleared", now)
+      : snapshot.lastApprovalOutcome;
   return withTaskRouterSnapshot(input.entry, {
     latestTask,
     recentTasks,
     pendingApproval: nextPendingApproval,
+    lastApprovalOutcome: nextApprovalOutcome,
   });
 }
