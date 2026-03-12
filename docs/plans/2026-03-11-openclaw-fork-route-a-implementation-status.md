@@ -426,3 +426,168 @@
 推进到：
 
 > 拥有一个最小 execution kernel seam，能够把聊天控制语义结构化成 execution command/event，并注入现有 reply runtime 继续执行。
+
+---
+
+# 2026-03-12 后续推进：approval loop 收口、readout surfacing 与 latest run 统一视图
+
+## 已完成追加
+
+### 1. chat-first approval loop 已形成完整最小闭环
+
+已落地：
+
+- `git` / `external` 高风险动作会在 runtime gate 命中后生成 `pendingApproval`
+- approval state 保持在 `SessionEntry.taskRouter.pendingApproval`
+- 用户可直接使用：
+  - `确认执行`
+  - `可以执行`
+  - `执行吧`
+  - `先别执行`
+  - `暂停这个`
+- `confirm_execution` 会恢复最近可恢复任务，并带一次性放行的 execution policy 继续执行
+- `reject_execution` 会清掉 approval，保持任务 `waiting_user`
+
+本轮关键提交：
+
+- `cc604e899` — `feat: add chat-first approval loop for runtime policy gates`
+
+### 2. approval 恢复语义已收紧为“精确绑定 + 保守回退”
+
+已落地：
+
+- `确认执行` 优先绑定：
+  - `taskId`
+  - `runSessionId`
+  - approval `kind`
+- 若 run session 漂移，但仍为同一 task，则允许保守 fallback
+- 若上下文失配，则明确拒绝恢复
+
+关键提交：
+
+- `f30072257` — `feat: tighten chat-first approval resume binding`
+
+### 3. approval 生命周期已形成两阶段消费 + cleanup + TTL
+
+已落地：
+
+- 两阶段消费：
+  - `pending`
+  - `resuming`
+  - `consumed / cleared`
+- cleanup policy：
+  - 新任务清旧 approval
+  - task 终态清 approval
+  - cancel 清 `resuming`
+  - continue / summary 不复活 stale approval
+- TTL：
+  - `pending` = 30 分钟
+  - `resuming` = 5 分钟
+
+关键提交：
+
+- `8357c804a` — `feat: add two-phase approval consumption state`
+- `16d9c4209` — `feat: add approval cleanup policy guards`
+- `7d2d812f4` — `feat: add approval ttl policy`
+
+### 4. approval 的用户面与观测面已收口
+
+已落地：
+
+- 统一 approval UX 文案：
+  - 已失效
+  - 上下文失配
+  - 重复确认
+  - 拒绝执行
+- 新增 `lastApprovalOutcome`：
+  - `rejected`
+  - `consumed`
+  - `expired`
+  - `context_mismatch`
+  - `cancelled`
+  - `terminal_cleared`
+
+关键提交：
+
+- `f083acc76` — `feat: unify approval ux messaging`
+- `8e62b946d` — `feat: surface approval outcome status`
+
+### 5. approval / run 状态已开始对外轻量可读
+
+已落地：
+
+- `总结一下` 会带：
+  - latest run readout
+  - approval readout
+- `任务列表` 会只对 latest task 增加轻量标记：
+  - approval readout
+  - latest run phase/profile readout
+
+关键提交：
+
+- `e1aa5b5b8` — `feat: surface approval readouts in task prompts`
+- `f6ae69011` — `feat: surface latest run phase in task readouts`
+
+### 6. latest run 统一视图 helper 已落地
+
+已落地：
+
+- `src/task/state.ts` 新增：
+  - `getLatestRunSnapshot(...)`
+  - `getLatestRunSessionId(...)`
+  - `updateTaskLatestRunSnapshot(...)`
+- `router.ts` / `kernel.ts` / run progress 写回已改为走统一 latest run 视图
+
+这意味着：
+
+- latest run 不再只是到处手搓字段
+- `summary / continue / approval / run progress / execution kernel` 已围绕同一套 run-state seam 读写
+
+关键提交：
+
+- `aa5c1a05c` — `feat: normalize latest run session state helpers`
+
+### 7. 文档与手动验收计划已补齐
+
+已落地：
+
+- 新增手动验收计划：
+  - `/root/dev/openclaw/docs/plans/2026-03-12-route-a-manual-validation-plan.md`
+
+关键提交：
+
+- `14c00a038` — `docs: add route A manual validation plan`
+
+## 当前测试基线
+
+当前完整定向回归结果：
+
+- `src/task/types.test.ts`
+- `src/task/protocol.test.ts`
+- `src/task/state.test.ts`
+- `src/task/router.test.ts`
+- `src/task/kernel.test.ts`
+- `src/auto-reply/reply/agent-runner-utils.test.ts`
+- `src/auto-reply/reply/get-reply-run.media-only.test.ts`
+- `src/agents/pi-embedded-runner/run/attempt.test.ts`
+
+结果：
+
+- `8` 个测试文件
+- `130/130 tests passed`
+
+## 当前判断
+
+截至当前版本，Route A 的这条主线已经从：
+
+> task-aware control + minimal execution seam
+
+推进到：
+
+> 拥有 chat-first approval loop、lifecycle management、approval/readout surfacing，以及 latest run 统一视图的控制平面雏形。
+
+仍未完全做深的部分主要是：
+
+- 更完整的 RunSession 独立对象层
+- 更工程化的 summary/status 输出
+- 隔离 dev 实例下的真实链路手动验收
