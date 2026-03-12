@@ -229,3 +229,53 @@ export function createRootRunSession(params: {
     rootRunSessionId: params.id,
   };
 }
+
+export function formatRunSessionPhaseLabel(status: RunSessionStatus): string {
+  switch (status) {
+    case "created":
+      return "初始化";
+    case "planning":
+      return "规划中";
+    case "researching":
+      return "分析研究";
+    case "building":
+      return "编码构建";
+    case "testing":
+      return "测试验证";
+    case "reviewing":
+      return "审查复盘";
+    case "summarizing":
+      return "生成总结";
+    case "paused":
+      return "已暂停";
+    case "blocked":
+      return "被阻塞";
+    case "completed":
+      return "已完成";
+    case "failed":
+      return "执行失败";
+    case "cancelled":
+      return "已取消";
+    default:
+      return status;
+  }
+}
+
+export function formatAgentProfileLabel(profile: AgentProfileId): string {
+  switch (profile) {
+    case "planner":
+      return "规划者";
+    case "researcher":
+      return "研究者";
+    case "builder":
+      return "构建者";
+    case "reviewer":
+      return "审查者";
+    case "summarizer":
+      return "总结者";
+    case "utility":
+      return "工具";
+    default:
+      return profile;
+  }
+}

@@ -13,6 +13,8 @@ import {
 } from "./state.js";
 import {
   deriveTaskTitle,
+  formatAgentProfileLabel,
+  formatRunSessionPhaseLabel,
   isResumableTaskStatus,
   resolveAgentProfileForTaskKind,
   resolveRunSessionStatusForTaskKind,
@@ -168,6 +170,42 @@ function buildTaskListPrompt(tasks: TaskRecord[], snapshot: TaskRouterSnapshot):
     ...lines,
     "Original user message: 任务列表",
   ].join("\n");
+}
+
+export function buildTaskStatusCard(
+  task: TaskRecord | undefined,
+  snapshot: TaskRouterSnapshot,
+): string {
+  if (!task) {
+    return "当前会话暂无活跃任务，Master。您可以直接描述一个新的开发目标来开始。";
+  }
+  const run = getLatestRunSnapshot(task);
+  const phaseLabel = run ? formatRunSessionPhaseLabel(run.status) : "未知";
+  const profileLabel = run ? formatAgentProfileLabel(run.agentProfile) : "—";
+  const lines: string[] = [
+    `📋 **任务状态**`,
+    `任务：${task.title}`,
+    `状态：${task.status}`,
+    `阶段：${phaseLabel}（${run?.status ?? "—"}）`,
+    `执行者：${profileLabel}`,
+  ];
+  const approvalLines = buildApprovalReadoutLines(snapshot, task);
+  if (approvalLines.length > 0) {
+    lines.push(...approvalLines.map((l) => `⚠️ ${l}`));
+  }
+  const hintMap: Record<string, string> = {
+    waiting_user: "发“继续”可以接着推进，或发“任务列表”查看所有任务。",
+    blocked: "任务已被阻塞，等待您确认后继续。",
+    running: "任务运行中，发“总结一下”获取进度汇报。",
+    completed: "任务已完成。如需继续下一步，请直接说明目标。",
+    cancelled: "任务已取消。如需重新开始，请直接说明新目标。",
+    failed: "任务执行失败。发“继续”可以尝试恢复，或说明新目标。",
+  };
+  const hint = hintMap[task.status];
+  if (hint) {
+    lines.push(`💡 ${hint}`);
+  }
+  return lines.join("\n");
 }
 
 function buildApprovalConfirmPrompt(

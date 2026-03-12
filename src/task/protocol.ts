@@ -20,6 +20,7 @@ export const CONTROL_ACTIONS = [
   "inject_feedback",
   "request_summary",
   "list_tasks",
+  "query_status",
   "confirm_execution",
   "reject_execution",
 ] as const;
@@ -115,6 +116,7 @@ const RESUME_PREFIXES = [/^继续[\s，,。.!！?？]*$/u, /^continue(?:\b|\s|$)
 const PAUSE_PREFIXES = [/^停一下/u, /^暂停/u, /^pause(?:\b|\s|$)/iu];
 const SUMMARY_PREFIXES = [/^总结一下/u, /^总结/u, /^summary(?:\b|\s|$)/iu];
 const TASK_LIST_PREFIXES = [/^任务列表/u, /^列出任务/u, /^list tasks?(?:\b|\s|$)/iu];
+const TASK_STATUS_PREFIXES = [/^任务状态/u, /^当前状态/u, /^status(?:\b|\s|$)/iu];
 const CANCEL_PREFIXES = [/^取消/u, /^停止任务/u, /^cancel(?:\b|\s|$)/iu];
 const CONFIRM_EXECUTION_PREFIXES = [
   /^确认执行[\s，,。.!！?？]*$/u,
@@ -188,6 +190,9 @@ export function inferControlAction(input: {
   }
   if (TASK_LIST_PREFIXES.some((re) => re.test(text))) {
     return { type: "list_tasks", ...base };
+  }
+  if (TASK_STATUS_PREFIXES.some((re) => re.test(text))) {
+    return { type: "query_status", ...base };
   }
   if (CONFIRM_EXECUTION_PREFIXES.some((re) => re.test(text))) {
     return { type: "confirm_execution", ...base };
